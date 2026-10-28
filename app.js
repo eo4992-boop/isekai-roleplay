@@ -465,34 +465,17 @@ async function handleSend() {
   let accumulatedText = "";
 
   try {
-    let response;
-    const isInteractionsApi = selectedModel.includes("3.8");
+    let response = null;
+    let lastErr = null;
+    const maxRetries = 3;
 
-    if (isInteractionsApi) {
-      // 최신 공식 Interactions API 호출 (Google 권장 차세대 API)
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse`;
-      const payload = {
-        model: selectedModel,
-        input: text,
-        stream: true,
-      };
-
-      if (lastInteractionId) {
-        payload.previous_interaction_id = lastInteractionId;
-      } else {
-        payload.system_instruction = SYSTEM_PROMPT;
+    // 일시적인 503/429 트래픽 스파이크를 자동으로 극복하는 지능형 재시도 루프
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 서버 트래픽 혼잡 감지 -> 1.5초 후 자동 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
+        await new Promise((r) => setTimeout(r, 1500));
       }
 
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(payload),
-      });
-    } else {
-      // 클래식 generateContent API 호출
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       const payload = {
         systemInstruction: {
@@ -503,54 +486,39 @@ async function handleSend() {
           temperature: 0.85,
           maxOutputTokens: 3000,
           thinkingConfig: {
-            thinkingBudget: 0, // 구글 기본 '생각하기(36초)' 끄기 -> 1초 만에 즉답!
+            thinkingBudget: 0, // 1초 즉답 보장
           },
         },
       };
 
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    }
-
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => null);
-      const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
-
-      // 구글 3.8 Flash 트래픽 폭주(high demand) 발생 시 3.5 Flash 자동 복구
-      if (
-        (response.status === 503 || response.status === 429 || errMsg.includes("high demand") || errMsg.includes("overloaded")) &&
-        isInteractionsApi
-      ) {
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">⚡ 3.8 Flash 트래픽 폭주 감지 -> 3.5 Flash 안정 모드로 자동 연결 중...</div>`;
-        
-        // 3.5-flash 엔드포인트로 즉시 폴백(Fallback) 호출
-        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
-        const fallbackPayload = {
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: conversationHistory,
-          generationConfig: {
-            temperature: 0.85,
-            maxOutputTokens: 3000,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        };
-
-        response = await fetch(fallbackEndpoint, {
+      try {
+        response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fallbackPayload),
+          body: JSON.stringify(payload),
         });
 
-        if (!response.ok) {
-          const fbErr = await response.json().catch(() => null);
-          throw new Error((fbErr && fbErr.error && fbErr.error.message) || errMsg);
+        if (response.ok) {
+          break; // 통신 성공 -> 스트리밍 개시
         }
-      } else {
-        throw new Error(errMsg);
+
+        const errJson = await response.json().catch(() => null);
+        lastErr = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
+
+        // 503(High Demand) 또는 429(Rate Limit) 일시적 에러는 재시도
+        if (response.status === 503 || response.status === 429 || lastErr.includes("high demand") || lastErr.includes("overloaded")) {
+          continue;
+        } else {
+          throw new Error(lastErr);
+        }
+      } catch (err) {
+        lastErr = err.message;
+        if (attempt === maxRetries - 1) throw err;
       }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(lastErr || "구글 서버 응답 오류");
     }
 
     const reader = response.body.getReader();
