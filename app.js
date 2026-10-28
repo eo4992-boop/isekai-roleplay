@@ -166,7 +166,12 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // 3. UI 및 상태 변수
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
-let selectedModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.5-flash";
+let savedModel = localStorage.getItem("GEMINI_MODEL");
+if (!savedModel || savedModel.includes("3.6") || savedModel.includes("3.5-flash") || savedModel === "gemini-3.8-flash") {
+  savedModel = "gemini-flash-lite-latest";
+  localStorage.setItem("GEMINI_MODEL", savedModel);
+}
+let selectedModel = savedModel;
 let currentTheme = localStorage.getItem("STATUS_THEME") || "gold";
 let conversationHistory = []; // { role: "user" | "model", parts: [{ text }] }
 let lastInteractionId = null; // Interactions API 다중 턴 세션 ID
@@ -477,18 +482,20 @@ async function handleSend() {
       }
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+      const genConfig = {
+        temperature: 0.85,
+        maxOutputTokens: 3000,
+      };
+      if (!selectedModel.includes("lite")) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
       const payload = {
         systemInstruction: {
           parts: [{ text: SYSTEM_PROMPT }],
         },
         contents: conversationHistory,
-        generationConfig: {
-          temperature: 0.85,
-          maxOutputTokens: 3000,
-          thinkingConfig: {
-            thinkingBudget: 0, // 1초 즉답 보장
-          },
-        },
+        generationConfig: genConfig,
       };
 
       try {
