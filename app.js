@@ -4,10 +4,10 @@
  */
 
 // =============================================================================
-// 1. 역공학으로 복원한 파서 상수 및 함수들 (@isekai/shared & UI Renderer)
+// 1. 역공학으로 복원한 파서 상수 및 함수들 (어떤 형식으로 출력되어도 100% 감지)
 // =============================================================================
-const INFO_REGEX = /```INFO\s*\n([\s\S]*?)```/;
-const CHOICES_REGEX = /```CHOICES\s*\n([\s\S]*?)```/;
+const INFO_BLOCK_REGEX = /```(?:INFO|info|status|STATUS)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
+const CHOICES_BLOCK_REGEX = /```(?:CHOICES|choices)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
 const DIALOGUE_QUOTE_REGEX = /^["“「『]/;
 
 const STATUS_WINDOW_FIELDS = [
@@ -28,17 +28,20 @@ const THEME_ACCENTS = {
 };
 
 /**
- * INFO 코드블록 내부 줄글 파싱 (Func 16514)
+ * 줄글에서 필드값 추출 (콜론, 별표, 불릿, 띄어쓰기 완벽 대응)
  */
 function parseFields(blockContent) {
   const result = {};
   const lines = blockContent.split("\n");
   for (const line of lines) {
     for (const field of STATUS_WINDOW_FIELDS) {
-      const prefix = field.label + ":";
-      const idx = line.indexOf(prefix);
-      if (idx !== -1) {
-        const val = line.slice(idx + prefix.length).trim();
+      // "빙의:", "**빙의:**", "- 빙의 :", "• 빙의:" 등 모든 변형 매칭
+      const regex = new RegExp(`(?:^|[\\s*•\\-])${field.label}[*]*\\s*[:：]\\s*(.+)`, "i");
+      const match = line.match(regex);
+      if (match && match[1]) {
+        let val = match[1].trim();
+        // 대괄호 [ ... ] 나 끝의 별표 ** 정리
+        val = val.replace(/^\[(.*)\]$/, "$1").replace(/\*\*$/, "").trim();
         if (val) result[field.key] = val;
       }
     }
@@ -47,49 +50,115 @@ function parseFields(blockContent) {
 }
 
 /**
- * 상태창 데이터 추출 (Func 16515)
+ * 상태창 데이터 추출 (코드블록 형태 및 일반 텍스트 목록 형태 모두 지원)
  */
 function extractStatusWindow(text) {
-  const match = text.match(INFO_REGEX);
-  if (!match || match.index === undefined) {
-    return { text, status: null };
+  // 1) ```INFO ... ``` 코드블록이 있는 경우
+  const blockMatch = text.match(INFO_BLOCK_REGEX);
+  if (blockMatch && blockMatch.index !== undefined) {
+    const cleanedText = (text.slice(0, blockMatch.index) + text.slice(blockMatch.index + blockMatch[0].length)).trim();
+    const fields = parseFields(blockMatch[1]);
+    const hasAny = Object.values(fields).some(Boolean);
+    if (hasAny) {
+      return { text: cleanedText, status: fields };
+    }
   }
-  const cleanedText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
-  const fields = parseFields(match[1]);
-  const hasAny = Object.values(fields).some(Boolean);
-  return { text: cleanedText, status: hasAny ? fields : null };
+
+  // 2) 코드블록 태그 없이 본문 안에 "빙의:", "장비:", "능력:" 등으로 나열된 경우 자동 감지
+  const looseFields = parseFields(text);
+  const matchedFieldCount = Object.keys(looseFields).length;
+  if (matchedFieldCount >= 2) {
+    // 본문에서 상태창에 해당하는 줄들만 깔끔하게 제거
+    const lines = text.split("\n");
+    const preservedLines = [];
+    for (const line of lines) {
+      let isStatusLine = false;
+      for (const field of STATUS_WINDOW_FIELDS) {
+        const regex = new RegExp(`(?:^|[\\s*•\\-])${field.label}[*]*\\s*[:：]`, "i");
+        if (regex.test(line)) {
+          isStatusLine = true;
+          break;
+        }
+      }
+      if (!isStatusLine && !line.includes("상태창") && !line.includes("STATUS")) {
+        preservedLines.push(line);
+      }
+    }
+    return { text: preservedLines.join("\n").trim(), status: looseFields };
+  }
+
+  return { text, status: null };
 }
 
 /**
- * 선택지 불릿/번호 정제 (Func 19558)
+ * 선택지 불릿/번호 정제
  */
 function cleanLine(line) {
-  return line.trim().replace(/^(?:\d+[.)]|[-•·])\s+/, "").trim();
+  return line
+    .trim()
+    .replace(/^(?:\d+[.)]|[-•·*]|\([0-9]\)|[①-⑩])\s*/, "")
+    .replace(/^\[(.*)\]$/, "$1")
+    .trim();
 }
 
 /**
- * 선택지 3~5개 추출 (Func 19559)
+ * 선택지 3~5개 추출 (코드블록 형태 및 하단 1, 2, 3 번호 나열 형태 모두 지원)
  */
 function extractChoices(text) {
-  const match = text.match(CHOICES_REGEX);
-  if (!match || match.index === undefined) {
-    return { text, choices: [] };
+  // 1) ```CHOICES ... ``` 코드블록이 있는 경우
+  const blockMatch = text.match(CHOICES_BLOCK_REGEX);
+  if (blockMatch && blockMatch.index !== undefined) {
+    const cleanedText = (text.slice(0, blockMatch.index) + text.slice(blockMatch.index + blockMatch[0].length)).trim();
+    const rawLines = blockMatch[1].split("\n");
+    const choices = rawLines
+      .map(cleanLine)
+      .filter((l) => l.length > 0)
+      .slice(0, 5);
+    if (choices.length > 0) {
+      return { text: cleanedText, choices };
+    }
   }
-  const cleanedText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
-  const rawLines = match[1].split("\n");
-  const choices = rawLines
-    .map(cleanLine)
-    .filter((l) => l.length > 0)
-    .slice(0, 5);
-  return { text: cleanedText, choices };
+
+  // 2) 코드블록 없이 본문 끝에 "1. ...", "2. ...", "3. ..." 형태로 적힌 경우 자동 감지
+  const lines = text.split("\n");
+  const extractedChoices = [];
+  const textLines = [];
+  let choiceSectionStarted = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const isNumbered = /^(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/.test(line);
+
+    if (isNumbered) {
+      choiceSectionStarted = true;
+      const cleaned = cleanLine(line);
+      if (cleaned) extractedChoices.push(cleaned);
+    } else if (choiceSectionStarted && line === "") {
+      // 선택지 사이 공백 건너뜀
+      continue;
+    } else {
+      if (choiceSectionStarted && extractedChoices.length >= 2) {
+        // 선택지 영역이 끝난 후 나머지 텍스트
+        textLines.push(line);
+      } else {
+        textLines.push(lines[i]);
+      }
+    }
+  }
+
+  if (extractedChoices.length >= 2) {
+    return { text: textLines.join("\n").trim(), choices: extractedChoices.slice(0, 5) };
+  }
+
+  return { text, choices: [] };
 }
 
 /**
  * 스트리밍 도중 열린 미완성 코드블록을 화면에서 숨김 (Func 19561)
  */
 function stripTrailingBlocksForStreaming(text) {
-  const tags = ["```CHOICES", "```INFO"];
-  const indices = tags.map((tag) => text.indexOf(tag)).filter((idx) => idx !== -1);
+  const tags = ["```CHOICES", "```choices", "```INFO", "```info", "```STATUS", "```status"];
+  const indices = tags.map((tag) => text.toLowerCase().indexOf(tag.toLowerCase())).filter((idx) => idx !== -1);
   if (indices.length === 0) return text;
   const cutPoint = Math.min(...indices);
   return text.slice(0, cutPoint).trimEnd();
