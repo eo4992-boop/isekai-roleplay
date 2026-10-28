@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#17181c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <title>창작물 빙의 시뮬레이션 (창·빙·시)</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- 마크다운 렌더러 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div id="app-container">
+    <!-- 상단 헤더 -->
+    <header>
+      <div class="header-title-wrap">
+        <div class="header-title">
+          <span>창·빙·시</span>
+          <span class="badge" id="model-badge">2.5-flash</span>
+        </div>
+        <div class="header-sub">창작물 빙의 시뮬레이션</div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-new-chat" class="btn-icon" title="새 시뮬레이션 시작">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+        <button id="btn-settings" class="btn-icon" title="설정">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 11대 특수 명령어 칩 가로 스크롤 바 -->
+    <div id="quick-command-bar">
+      <button class="cmd-chip" data-cmd="세이브">💾 세이브</button>
+      <button class="cmd-chip" data-cmd="인벤토리">🎒 인벤토리</button>
+      <button class="cmd-chip" data-cmd="퀘스트">📜 퀘스트</button>
+      <button class="cmd-chip" data-cmd="프로필">📛 프로필</button>
+      <button class="cmd-chip" data-cmd="마갤모드">💻 마갤모드</button>
+      <button class="cmd-chip" data-cmd="대사모드">🗣️ 대사모드</button>
+      <button class="cmd-chip" data-cmd="관찰모드">👀 관찰모드</button>
+      <button class="cmd-chip" data-cmd="선택지모드">💠 선택지모드</button>
+      <button class="cmd-chip" data-cmd="설정모드">⚙️ 설정모드</button>
+    </div>
+
+    <!-- 채팅 메시지 목록 -->
+    <main id="chat-messages"></main>
+
+    <!-- 하단 입력 바 -->
+    <footer>
+      <div class="input-container">
+        <textarea id="chat-input" placeholder="메시지를 입력하세요 (예: 나루토, 1, 행동 등)..." rows="1"></textarea>
+        <button id="btn-send" class="btn-send" title="전송">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </footer>
+
+    <!-- 설정 모달 -->
+    <div id="settings-modal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-title">⚙️ 시뮬레이션 환경 설정</div>
+          <button id="btn-close-modal" class="btn-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="input-api-key">Gemini API 키 (무료)</label>
+          <input type="password" id="input-api-key" class="form-input" placeholder="AIzaSy...">
+          <span style="font-size: 11px; color: var(--text-sub);">
+            API 키가 없으신가요? <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: var(--current-accent);">Google AI Studio</a>에서 1초 만에 무료 발급 가능합니다. (내 브라우저에만 안전하게 저장됨)
+          </span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="select-model">AI 모델 선택</label>
+          <select id="select-model" class="form-select">
+            <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (최신 모델 · 초고속 · 추천)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="select-theme">상태창 테마 스타일</label>
+          <select id="select-theme" class="form-select">
+            <option value="gold">골드 (기본 · Ritual)</option>
+            <option value="mono">모노 글로우 (Cyber Glow)</option>
+            <option value="emerald">에메랄드 (Dashboard)</option>
+            <option value="royal">황혼 (Twilight Glass)</option>
+            <option value="crimson">크림슨 (Diamond Red)</option>
+            <option value="widget">시스템 글래스 (HUD Widget)</option>
+          </select>
+        </div>
+
+        <button id="btn-save-settings" class="btn-primary">설정 저장 및 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

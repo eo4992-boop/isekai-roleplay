@@ -1,0 +1,5 @@
+# Git Ignore
+server.py
+run.bat
+.DS_Store
+Thumbs.db

@@ -1,0 +1,586 @@
+/* ==========================================================================
+   창작물 빙의 시뮬레이션 (창·빙·시) 웹 클론 테마 스타일
+   원본 APK: isekairoleplay.app v1.71 Hermes 바이트코드 추출 기반
+   ========================================================================== */
+
+:root {
+  --bg-color: #0e0e11;
+  --surface-color: #17181c;
+  --surface-card: #202228;
+  --border-color: #2b2d35;
+  --text-main: #f3f4f6;
+  --text-sub: #9ca3af;
+  --text-narration: #a3a8b5;
+  --text-dialogue: #ffffff;
+  
+  /* 테마별 악센트 (기본: 골드) */
+  --accent-gold: #d4af37;
+  --accent-mono: #7dd3fc;
+  --accent-emerald: #34d399;
+  --accent-royal: #a78bfa;
+  --accent-crimson: #e0384a;
+  --accent-widget: #38bdf8;
+  
+  --current-accent: var(--accent-gold);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* 스마트폰 프레임 (PC에서는 모바일 폰 뷰, 모바일에서는 꽉 찬 화면) */
+#app-container {
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  background-color: var(--surface-color);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+}
+
+@media (max-width: 480px) {
+  #app-container {
+    max-width: 100%;
+    border: none;
+  }
+}
+
+/* 상단 네비게이션 헤더 */
+header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background-color: rgba(23, 24, 28, 0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 20;
+}
+
+.header-title-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.header-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-title span.badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: rgba(212, 175, 55, 0.15);
+  color: var(--current-accent);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.header-sub {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--text-sub);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  background-color: var(--surface-card);
+  color: var(--text-main);
+}
+
+/* 빠른 명령어 가로 스크롤 칩 (Quick Action Bar) */
+#quick-command-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  background-color: var(--bg-color);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+#quick-command-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.cmd-chip {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 5px 11px;
+  border-radius: 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cmd-chip:hover, .cmd-chip:active {
+  background-color: rgba(212, 175, 55, 0.12);
+  border-color: var(--current-accent);
+  color: var(--current-accent);
+  transform: translateY(-1px);
+}
+
+/* 채팅 메시지 리스트 영역 */
+#chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+
+.message-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.message-row.user {
+  align-items: flex-end;
+}
+
+.message-row.assistant {
+  align-items: flex-start;
+}
+
+/* 유저 말풍선 */
+.bubble-user {
+  max-width: 82%;
+  background: linear-gradient(135deg, #2b3040, #1f2330);
+  border: 1px solid #3b4256;
+  border-radius: 16px 16px 2px 16px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #ffffff;
+  word-break: break-word;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* AI 말풍선 */
+.bubble-assistant {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-content {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px 16px 16px 2px;
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-main);
+  word-break: break-word;
+}
+
+/* 나레이션 & 대사 스타일링 */
+.assistant-content p {
+  margin-bottom: 10px;
+}
+.assistant-content p:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-content .dialogue-text {
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.assistant-content .narration-text {
+  color: var(--text-narration);
+}
+
+/* 마크다운 테이블 (온보딩 표) */
+.assistant-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+
+.assistant-content th, .assistant-content td {
+  border: 1px solid var(--border-color);
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.assistant-content th {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--current-accent);
+}
+
+/* ==========================================================================
+   상태창 카드 컴포넌트 (StatusWindowCard)
+   바이트코드 Func 18578, Func 19543~19548 완벽 복원
+   ========================================================================== */
+.status-card {
+  width: 100%;
+  background: linear-gradient(180deg, rgba(32, 34, 40, 0.95), rgba(20, 21, 26, 0.95));
+  border: 1px solid var(--current-accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  animation: fadeIn 0.3s ease;
+}
+
+.status-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.status-card-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--current-accent);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-card-title::before {
+  content: "◆";
+  font-size: 9px;
+}
+
+.status-card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.status-row {
+  display: flex;
+  align-items: baseline;
+  font-size: 12.5px;
+  padding: 2px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.status-row:last-child {
+  border-bottom: none;
+}
+
+.status-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 68px;
+  color: var(--current-accent);
+  font-weight: 600;
+}
+
+.status-icon {
+  font-size: 13px;
+}
+
+.status-value {
+  color: #f3f4f6;
+  flex: 1;
+  word-break: break-all;
+}
+
+/* ==========================================================================
+   선택지 버튼 목록 (StoryChoices)
+   바이트코드 Func 19535~19540 완벽 복원
+   ========================================================================== */
+.choices-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  animation: fadeIn 0.35s ease;
+}
+
+.choice-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.choice-card-btn {
+  flex: 1;
+  background: linear-gradient(135deg, rgba(32, 34, 40, 0.9), rgba(24, 25, 30, 0.9));
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.choice-card-btn:hover {
+  background: linear-gradient(135deg, rgba(42, 45, 54, 0.95), rgba(30, 32, 38, 0.95));
+  border-color: var(--current-accent);
+  color: #ffffff;
+  transform: translateX(2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.choice-card-btn .choice-number {
+  color: var(--current-accent);
+  font-weight: 700;
+  font-size: 12px;
+  min-width: 16px;
+}
+
+.choice-edit-btn {
+  width: 36px;
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.choice-edit-btn:hover {
+  border-color: var(--current-accent);
+  color: var(--current-accent);
+  background-color: rgba(212, 175, 55, 0.1);
+}
+
+/* 하단 메시지 입력창 바 */
+footer {
+  padding: 10px 14px 14px 14px;
+  background-color: var(--surface-color);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+
+.input-container {
+  display: flex;
+  align-items: flex-end;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 4px 8px 4px 14px;
+  transition: border-color 0.2s;
+}
+
+.input-container:focus-within {
+  border-color: var(--current-accent);
+  box-shadow: 0 0 0 1px var(--current-accent);
+}
+
+#chat-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  max-height: 100px;
+  min-height: 24px;
+  padding: 6px 0;
+  font-family: inherit;
+}
+
+.btn-send {
+  background-color: var(--current-accent);
+  color: #121214;
+  border: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 6px;
+  margin-bottom: 2px;
+  transition: transform 0.15s, opacity 0.15s;
+}
+
+.btn-send:hover {
+  transform: scale(1.05);
+}
+
+.btn-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 스트리밍 타이핑 인디케이터 */
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 10px;
+}
+
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  background-color: var(--current-accent);
+  border-radius: 50%;
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 모달 팝업 (설정창) */
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-content {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.9);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 12px;
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.form-input, .form-select {
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.form-input:focus, .form-select:focus {
+  border-color: var(--current-accent);
+}
+
+.btn-primary {
+  background-color: var(--current-accent);
+  color: #121214;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
