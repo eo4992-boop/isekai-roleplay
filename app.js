@@ -250,6 +250,7 @@ if (!savedModel || savedModel.includes("3.6") || savedModel.includes("3.5-flash"
 let selectedModel = savedModel;
 let currentTheme = localStorage.getItem("STATUS_THEME") || "gold";
 let conversationHistory = []; // { role: "user" | "model", parts: [{ text }] }
+let renderedMessages = []; // 브라우저 로컬 저장소 영구 보존용 전체 메시지 배열
 let lastInteractionId = null; // Interactions API 다중 턴 세션 ID
 let isGenerating = false;
 
@@ -279,8 +280,10 @@ function initApp() {
     setTimeout(() => openSettingsModal(), 400);
   }
 
-  // 첫 환영 온보딩 메시지 출력 (클라이언트 로컬 즉시 생성)
-  resetConversation();
+  // 이전 대화 기록이 있으면 자동 복원, 없으면 새 온보딩 시작
+  if (!loadChatFromStorage()) {
+    resetConversation();
+  }
 
   // 입력창 엔터 전송 처리
   chatInputEl.addEventListener("keydown", (e) => {
@@ -351,26 +354,84 @@ function saveSettings() {
 function resetConversation() {
   chatMessagesEl.innerHTML = "";
   conversationHistory = [];
+  renderedMessages = [];
   lastInteractionId = null;
+  localStorage.removeItem("ISEKAI_SAVED_CHAT");
   appendAssistantMessage(ONBOARDING_MESSAGE, null, [
     "나루토 세계관으로 빙의",
     "원피스 세계관으로 빙의",
     "주술회전 세계관으로 빙의",
-  ]);
+  ], true);
+}
+
+/**
+ * 대화 내역 전체를 스마트폰 로컬 저장소에 영구 보존
+ */
+function saveChatToStorage() {
+  try {
+    const data = {
+      renderedMessages,
+      conversationHistory,
+      lastInteractionId,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem("ISEKAI_SAVED_CHAT", JSON.stringify(data));
+  } catch (e) {
+    console.error("대화 저장 실패:", e);
+  }
+}
+
+/**
+ * 앱을 껐다 켰을 때 이전 대화 및 상태창 완벽 복원
+ */
+function loadChatFromStorage() {
+  try {
+    const raw = localStorage.getItem("ISEKAI_SAVED_CHAT");
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data.renderedMessages || data.renderedMessages.length === 0) return false;
+
+    chatMessagesEl.innerHTML = "";
+    renderedMessages = data.renderedMessages;
+    conversationHistory = data.conversationHistory || [];
+    lastInteractionId = data.lastInteractionId || null;
+
+    // 저장된 모든 메시지 복원
+    for (const msg of renderedMessages) {
+      if (msg.role === "user") {
+        const row = document.createElement("div");
+        row.className = "message-row user";
+        row.innerHTML = `<div class="bubble-user">${escapeHtml(msg.text)}</div>`;
+        chatMessagesEl.appendChild(row);
+      } else {
+        appendAssistantMessage(msg.text, msg.status, msg.choices, false);
+      }
+    }
+    scrollToBottom();
+    return true;
+  } catch (e) {
+    console.error("대화 복원 실패:", e);
+    return false;
+  }
 }
 
 // =============================================================================
 // 5. 메시지 렌더링 함수들 (대사/나레이션 분기, 상태창 카드, 선택지 버튼)
 // =============================================================================
-function appendUserMessage(text) {
+function appendUserMessage(text, shouldSave = true) {
   const row = document.createElement("div");
   row.className = "message-row user";
   row.innerHTML = `<div class="bubble-user">${escapeHtml(text)}</div>`;
   chatMessagesEl.appendChild(row);
   scrollToBottom();
+
+  if (shouldSave) {
+    renderedMessages.push({ role: "user", text });
+    saveChatToStorage();
+  }
 }
 
-function appendAssistantMessage(fullText, statusData = null, choices = []) {
+function appendAssistantMessage(fullText, statusData = null, choices = [], shouldSave = true) {
   const row = document.createElement("div");
   row.className = "message-row assistant";
 
@@ -398,6 +459,17 @@ function appendAssistantMessage(fullText, statusData = null, choices = []) {
   row.appendChild(bubble);
   chatMessagesEl.appendChild(row);
   scrollToBottom();
+
+  if (shouldSave) {
+    renderedMessages.push({
+      role: "assistant",
+      text: fullText,
+      status: statusData,
+      choices: choices,
+    });
+    saveChatToStorage();
+  }
+
   return { row, contentEl, bubble };
 }
 
@@ -675,6 +747,14 @@ async function handleSend() {
       role: "model",
       parts: [{ text: accumulatedText }],
     });
+
+    renderedMessages.push({
+      role: "assistant",
+      text: finalText,
+      status: status,
+      choices: choices,
+    });
+    saveChatToStorage();
 
     scrollToBottom();
   } catch (err) {
