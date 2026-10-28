@@ -263,6 +263,8 @@ const btnSettingsEl = document.getElementById("btn-settings");
 const btnCloseModalEl = document.getElementById("btn-close-modal");
 const btnSaveSettingsEl = document.getElementById("btn-save-settings");
 const btnNewChatEl = document.getElementById("btn-new-chat");
+const btnReloadEl = document.getElementById("btn-reload");
+const btnForceReloadEl = document.getElementById("btn-force-reload");
 const inputApiKeyEl = document.getElementById("input-api-key");
 const selectModelEl = document.getElementById("select-model");
 const selectThemeEl = document.getElementById("select-theme");
@@ -319,6 +321,49 @@ function initApp() {
       }
     });
   });
+
+  // 새로고침 버튼 (PWA 캐시 갱신 및 최신 코드 즉시 로드)
+  if (btnReloadEl) {
+    btnReloadEl.addEventListener("click", () => {
+      saveChatToStorage();
+      window.location.href = window.location.origin + window.location.pathname + "?t=" + Date.now();
+    });
+  }
+  if (btnForceReloadEl) {
+    btnForceReloadEl.addEventListener("click", () => {
+      saveChatToStorage();
+      if ("caches" in window) {
+        caches.keys().then((names) => {
+          for (let name of names) caches.delete(name);
+        });
+      }
+      window.location.href = window.location.origin + window.location.pathname + "?t=" + Date.now();
+    });
+  }
+
+  // 앱을 백그라운드로 넘기거나 창을 닫을 때 무조건 강제 동기화
+  window.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      saveChatToStorage();
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    saveChatToStorage();
+  });
+
+  // Android 뒤로가기 제스처 지원 (설정창 닫기 및 이탈 방지)
+  try {
+    history.pushState({ app: "isekai" }, "");
+    window.addEventListener("popstate", () => {
+      if (settingsModalEl.style.display === "flex") {
+        closeSettingsModal();
+        history.pushState({ app: "isekai" }, "");
+      } else {
+        saveChatToStorage();
+        history.pushState({ app: "isekai" }, "");
+      }
+    });
+  } catch (e) {}
 }
 
 function applyTheme(themeKey) {
