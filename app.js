@@ -166,7 +166,7 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // 3. UI 및 상태 변수
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
-let selectedModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.8-flash";
+let selectedModel = localStorage.getItem("GEMINI_MODEL") || "gemini-3.5-flash";
 let currentTheme = localStorage.getItem("STATUS_THEME") || "gold";
 let conversationHistory = []; // { role: "user" | "model", parts: [{ text }] }
 let lastInteractionId = null; // Interactions API 다중 턴 세션 ID
@@ -516,15 +516,15 @@ async function handleSend() {
       const errJson = await response.json().catch(() => null);
       const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
 
-      // 구글 3.8 Flash 트래픽 폭주(high demand) 발생 시 자동 복구 로직
+      // 구글 3.8 Flash 트래픽 폭주(high demand) 발생 시 3.5 Flash 자동 복구
       if (
         (response.status === 503 || response.status === 429 || errMsg.includes("high demand") || errMsg.includes("overloaded")) &&
         isInteractionsApi
       ) {
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">⚡ 3.8 Flash 서버 일시적 트래픽 감지 -> 1.5 Flash 안정 모드로 자동 연결 중...</div>`;
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">⚡ 3.8 Flash 트래픽 폭주 감지 -> 3.5 Flash 안정 모드로 자동 연결 중...</div>`;
         
-        // 1.5-flash 엔드포인트로 즉시 폴백(Fallback) 호출
-        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
+        // 3.5-flash 엔드포인트로 즉시 폴백(Fallback) 호출
+        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
         const fallbackPayload = {
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: conversationHistory,
