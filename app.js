@@ -514,7 +514,36 @@ async function handleSend() {
 
     if (!response.ok) {
       const errJson = await response.json().catch(() => null);
-      throw new Error((errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`);
+      const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
+
+      // 구글 3.8 Flash 트래픽 폭주(high demand) 발생 시 자동 복구 로직
+      if (
+        (response.status === 503 || response.status === 429 || errMsg.includes("high demand") || errMsg.includes("overloaded")) &&
+        isInteractionsApi
+      ) {
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">⚡ 3.8 Flash 서버 일시적 트래픽 감지 -> 1.5 Flash 안정 모드로 자동 연결 중...</div>`;
+        
+        // 1.5-flash 엔드포인트로 즉시 폴백(Fallback) 호출
+        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`;
+        const fallbackPayload = {
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: conversationHistory,
+          generationConfig: { temperature: 0.85, maxOutputTokens: 3000 },
+        };
+
+        response = await fetch(fallbackEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fallbackPayload),
+        });
+
+        if (!response.ok) {
+          const fbErr = await response.json().catch(() => null);
+          throw new Error((fbErr && fbErr.error && fbErr.error.message) || errMsg);
+        }
+      } else {
+        throw new Error(errMsg);
+      }
     }
 
     const reader = response.body.getReader();
