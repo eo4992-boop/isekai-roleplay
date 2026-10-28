@@ -502,6 +502,9 @@ async function handleSend() {
         generationConfig: {
           temperature: 0.85,
           maxOutputTokens: 3000,
+          thinkingConfig: {
+            thinkingBudget: 0, // 구글 기본 '생각하기(36초)' 끄기 -> 1초 만에 즉답!
+          },
         },
       };
 
@@ -528,7 +531,11 @@ async function handleSend() {
         const fallbackPayload = {
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: conversationHistory,
-          generationConfig: { temperature: 0.85, maxOutputTokens: 3000 },
+          generationConfig: {
+            temperature: 0.85,
+            maxOutputTokens: 3000,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         };
 
         response = await fetch(fallbackEndpoint, {
