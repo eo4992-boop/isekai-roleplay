@@ -31,7 +31,7 @@
           <div class="header-title">
             <span>창·빙·시</span>
             <span class="badge" id="model-badge">flash-lite</span>
-            <span class="badge" id="version-badge" style="background: rgba(212,175,55,0.15); color: var(--current-accent); font-size: 10px; margin-left: 4px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--current-accent);">v1.3 세션</span>
+            <span class="badge" id="version-badge" style="background: rgba(212,175,55,0.15); color: var(--current-accent); font-size: 10px; margin-left: 4px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--current-accent);">v1.4 세이브알림</span>
           </div>
           <div class="header-sub">창작물 빙의 시뮬레이션</div>
         </div>
@@ -76,6 +76,18 @@
 
     <!-- 하단 입력 바 -->
     <footer>
+      <!-- 스마트 세이브 알림 바 (기억 보존 권장) -->
+      <div id="save-reminder-banner" class="save-reminder-banner" style="display: none;">
+        <div class="reminder-text">
+          <span>💾</span>
+          <span>스토리가 <strong id="reminder-turns-count">10턴</strong> 진행되었어요! '세이브'로 기억을 압축할까요?</span>
+        </div>
+        <div class="reminder-actions">
+          <button id="btn-do-save" class="reminder-btn-confirm">지금 세이브</button>
+          <button id="btn-dismiss-save" class="reminder-btn-dismiss" title="나중에 알림">✕</button>
+        </div>
+      </div>
+
       <div class="input-container">
         <textarea id="chat-input" placeholder="메시지를 입력하세요 (예: 나루토, 1, 행동 등)..." rows="1"></textarea>
         <button id="btn-send" class="btn-send" title="전송">
@@ -114,6 +126,16 @@
             <option value="gemini-flash-lite-latest" selected>Gemini Flash Lite (넉넉한 쿼터 · 서버 상시 안정 · 강력 추천)</option>
             <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (초고속 경량형)</option>
             <option value="gemini-3.5-flash">Gemini 3.5 Flash (일일 20회 제한 모델)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="select-save-mode">스토리 기억력 보존 (세이브 요약 주기)</label>
+          <select id="select-save-mode" class="form-select">
+            <option value="10" selected>10턴마다 알림 (약 1,000 토큰 · 추천)</option>
+            <option value="15">15턴마다 알림 (약 1,500 토큰)</option>
+            <option value="auto">완전 자동 (10턴마다 자동 요약 실행)</option>
+            <option value="off">알림 끄기</option>
           </select>
         </div>
 
@@ -170,6 +192,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.3"></script>
+  <script src="app.js?v=1.4"></script>
 </body>
 </html>

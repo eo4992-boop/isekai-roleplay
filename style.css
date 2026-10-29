@@ -406,6 +406,76 @@ header {
   background-color: rgba(212, 175, 55, 0.1);
 }
 
+/* 스마트 세이브 알림 바 (기억 보존 추천) */
+.save-reminder-banner {
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0.14), rgba(23, 24, 28, 0.95));
+  border: 1px solid var(--current-accent);
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  animation: fadeIn 0.25s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  margin-bottom: 2px;
+}
+
+.reminder-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-main);
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.reminder-text strong {
+  color: var(--current-accent);
+}
+
+.reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.reminder-btn-confirm {
+  background-color: var(--current-accent);
+  color: #121214;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.reminder-btn-confirm:active {
+  opacity: 0.85;
+}
+
+.reminder-btn-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-sub);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 3px 6px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.reminder-btn-dismiss:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
 /* 하단 메시지 입력창 바 */
 footer {
   padding: 10px 14px 14px 14px;

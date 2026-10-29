@@ -280,6 +280,16 @@ const drawerOverlayEl = document.getElementById("drawer-overlay");
 const drawerContentEl = document.getElementById("drawer-content");
 const sessionListEl = document.getElementById("session-list");
 
+// 스마트 세이브 알림 DOM 엘리먼트
+const saveReminderBannerEl = document.getElementById("save-reminder-banner");
+const reminderTurnsCountEl = document.getElementById("reminder-turns-count");
+const btnDoSaveEl = document.getElementById("btn-do-save");
+const btnDismissSaveEl = document.getElementById("btn-dismiss-save");
+const selectSaveModeEl = document.getElementById("select-save-mode");
+
+let saveReminderMode = localStorage.getItem("ISEKAI_SAVE_REMINDER_MODE") || "10";
+let dismissedUntilTurn = 0;
+
 // =============================================================================
 // 4. 초기화 및 이벤트 리스너
 // =============================================================================
@@ -334,6 +344,22 @@ function initApp() {
   if (btnDrawerNewEl) {
     btnDrawerNewEl.addEventListener("click", () => {
       createNewSession(true);
+    });
+  }
+
+  // 스마트 세이브 알림 바 버튼 이벤트
+  if (btnDoSaveEl) {
+    btnDoSaveEl.addEventListener("click", () => {
+      if (isGenerating) return;
+      chatInputEl.value = "세이브";
+      if (saveReminderBannerEl) saveReminderBannerEl.style.display = "none";
+      handleSend();
+    });
+  }
+  if (btnDismissSaveEl) {
+    btnDismissSaveEl.addEventListener("click", () => {
+      if (saveReminderBannerEl) saveReminderBannerEl.style.display = "none";
+      dismissedUntilTurn = getTurnsSinceLastSave() + 5; // 5턴 동안 알림 숨김
     });
   }
 
@@ -406,6 +432,7 @@ function openSettingsModal() {
   inputApiKeyEl.value = apiKey;
   selectModelEl.value = selectedModel;
   selectThemeEl.value = currentTheme;
+  if (selectSaveModeEl) selectSaveModeEl.value = saveReminderMode;
   settingsModalEl.style.display = "flex";
 }
 
@@ -417,6 +444,12 @@ function saveSettings() {
   apiKey = inputApiKeyEl.value.trim();
   selectedModel = selectModelEl.value;
   applyTheme(selectThemeEl.value);
+
+  if (selectSaveModeEl) {
+    saveReminderMode = selectSaveModeEl.value;
+    localStorage.setItem("ISEKAI_SAVE_REMINDER_MODE", saveReminderMode);
+    checkSaveReminder();
+  }
 
   localStorage.setItem("GEMINI_API_KEY", apiKey);
   localStorage.setItem("GEMINI_MODEL", selectedModel);
@@ -511,6 +544,57 @@ function loadChatFromStorage() {
 }
 
 /**
+ * 마지막 '세이브' 이후 진행된 사용자 턴 수 계산
+ */
+function getTurnsSinceLastSave() {
+  const cur = getCurrentSession();
+  if (!cur || !cur.renderedMessages) return 0;
+  let count = 0;
+  for (let i = cur.renderedMessages.length - 1; i >= 0; i--) {
+    const msg = cur.renderedMessages[i];
+    if (msg.role === "user") {
+      const trimmed = msg.text.trim();
+      if (trimmed === "세이브" || trimmed.startsWith("세이브")) {
+        break;
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * 대화가 10~15턴(약 1,000 토큰) 누적되었을 때 스마트 세이브 알림 바 표시 또는 자동 실행
+ */
+function checkSaveReminder() {
+  if (!saveReminderBannerEl) return;
+  const mode = localStorage.getItem("ISEKAI_SAVE_REMINDER_MODE") || "10";
+  if (mode === "off") {
+    saveReminderBannerEl.style.display = "none";
+    return;
+  }
+
+  const count = getTurnsSinceLastSave();
+  const threshold = mode === "15" ? 15 : 10;
+
+  if (count >= threshold && count >= dismissedUntilTurn) {
+    if (reminderTurnsCountEl) {
+      reminderTurnsCountEl.textContent = `${count}턴`;
+    }
+    saveReminderBannerEl.style.display = "flex";
+
+    // '완전 자동' 모드인 경우 10턴 도달 시 자동으로 요약 요청 전송
+    if (mode === "auto" && !isGenerating && count === threshold) {
+      chatInputEl.value = "세이브";
+      saveReminderBannerEl.style.display = "none";
+      setTimeout(() => handleSend(), 500);
+    }
+  } else {
+    saveReminderBannerEl.style.display = "none";
+  }
+}
+
+/**
  * 활성 세션의 메시지들을 채팅 화면에 렌더링
  */
 function renderActiveSession() {
@@ -533,6 +617,7 @@ function renderActiveSession() {
     }
   }
   scrollToBottom();
+  checkSaveReminder();
 }
 
 /**
@@ -570,6 +655,8 @@ function createNewSession(withToast = false) {
 
   saveChatToStorage();
   closeDrawer();
+  dismissedUntilTurn = 0;
+  checkSaveReminder();
 
   if (withToast) {
     chatInputEl.placeholder = "새 세계관 또는 캐릭터를 입력하세요...";
@@ -1065,6 +1152,7 @@ async function handleSend() {
     }
 
     saveChatToStorage();
+    checkSaveReminder();
 
     scrollToBottom();
   } catch (err) {
