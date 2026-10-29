@@ -249,8 +249,10 @@ if (!savedModel || savedModel.includes("3.6") || savedModel.includes("3.5-flash"
 }
 let selectedModel = savedModel;
 let currentTheme = localStorage.getItem("STATUS_THEME") || "gold";
+let sessions = []; // 다중 대화 세션 배열 [{ id, title, createdAt, updatedAt, renderedMessages, conversationHistory, lastInteractionId }]
+let activeSessionId = null; // 현재 활성화된 세션 ID
 let conversationHistory = []; // { role: "user" | "model", parts: [{ text }] }
-let renderedMessages = []; // 브라우저 로컬 저장소 영구 보존용 전체 메시지 배열
+let renderedMessages = []; // 화면 렌더링 메시지 배열
 let lastInteractionId = null; // Interactions API 다중 턴 세션 ID
 let isGenerating = false;
 
@@ -270,6 +272,14 @@ const selectModelEl = document.getElementById("select-model");
 const selectThemeEl = document.getElementById("select-theme");
 const modelBadgeEl = document.getElementById("model-badge");
 
+// 사이드바 드로어 (세션 목록) DOM 엘리먼트
+const btnDrawerEl = document.getElementById("btn-drawer");
+const btnCloseDrawerEl = document.getElementById("btn-close-drawer");
+const btnDrawerNewEl = document.getElementById("btn-drawer-new");
+const drawerOverlayEl = document.getElementById("drawer-overlay");
+const drawerContentEl = document.getElementById("drawer-content");
+const sessionListEl = document.getElementById("session-list");
+
 // =============================================================================
 // 4. 초기화 및 이벤트 리스너
 // =============================================================================
@@ -282,9 +292,9 @@ function initApp() {
     setTimeout(() => openSettingsModal(), 400);
   }
 
-  // 이전 대화 기록이 있으면 자동 복원, 없으면 새 온보딩 시작
+  // 이전 세션 기록 복원, 없으면 새 세션 시작
   if (!loadChatFromStorage()) {
-    resetConversation();
+    createNewSession(false);
   }
 
   // 입력창 엔터 전송 처리
@@ -305,11 +315,27 @@ function initApp() {
   btnSettingsEl.addEventListener("click", openSettingsModal);
   btnCloseModalEl.addEventListener("click", closeSettingsModal);
   btnSaveSettingsEl.addEventListener("click", saveSettings);
+
+  // '+' 버튼 클릭 시: 기존 대화는 안전하게 보존하고 새로운 시뮬레이션 세션 생성
   btnNewChatEl.addEventListener("click", () => {
-    if (confirm("새로운 시뮬레이션을 시작하시겠습니까? 현재 대화가 초기화됩니다.")) {
-      resetConversation();
-    }
+    createNewSession(true);
   });
+
+  // 사이드바 드로어 이벤트 리스너
+  if (btnDrawerEl) {
+    btnDrawerEl.addEventListener("click", openDrawer);
+  }
+  if (btnCloseDrawerEl) {
+    btnCloseDrawerEl.addEventListener("click", closeDrawer);
+  }
+  if (drawerOverlayEl) {
+    drawerOverlayEl.addEventListener("click", closeDrawer);
+  }
+  if (btnDrawerNewEl) {
+    btnDrawerNewEl.addEventListener("click", () => {
+      createNewSession(true);
+    });
+  }
 
   // 명령어 칩 버튼 클릭
   document.querySelectorAll(".cmd-chip").forEach((chip) => {
@@ -351,11 +377,14 @@ function initApp() {
     saveChatToStorage();
   });
 
-  // Android 뒤로가기 제스처 지원 (설정창 닫기 및 이탈 방지)
+  // Android 뒤로가기 제스처 지원 (드로어 닫기 -> 설정창 닫기 -> 이탈 방지)
   try {
     history.pushState({ app: "isekai" }, "");
     window.addEventListener("popstate", () => {
-      if (settingsModalEl.style.display === "flex") {
+      if (drawerContentEl && drawerContentEl.classList.contains("open")) {
+        closeDrawer();
+        history.pushState({ app: "isekai" }, "");
+      } else if (settingsModalEl.style.display === "flex") {
         closeSettingsModal();
         history.pushState({ app: "isekai" }, "");
       } else {
@@ -396,17 +425,11 @@ function saveSettings() {
   closeSettingsModal();
 }
 
-function resetConversation() {
-  chatMessagesEl.innerHTML = "";
-  conversationHistory = [];
-  renderedMessages = [];
-  lastInteractionId = null;
-  localStorage.removeItem("ISEKAI_SAVED_CHAT");
-  appendAssistantMessage(ONBOARDING_MESSAGE, null, [
-    "나루토 세계관으로 빙의",
-    "원피스 세계관으로 빙의",
-    "주술회전 세계관으로 빙의",
-  ], true);
+// =============================================================================
+// 다중 대화 세션 관리 시스템 (Multi-Session Manager)
+// =============================================================================
+function getCurrentSession() {
+  return sessions.find((s) => s.id === activeSessionId) || sessions[0];
 }
 
 /**
@@ -414,50 +437,278 @@ function resetConversation() {
  */
 function saveChatToStorage() {
   try {
-    const data = {
-      renderedMessages,
-      conversationHistory,
-      lastInteractionId,
-      updatedAt: Date.now(),
-    };
-    localStorage.setItem("ISEKAI_SAVED_CHAT", JSON.stringify(data));
+    const cur = getCurrentSession();
+    if (cur) {
+      cur.renderedMessages = renderedMessages;
+      cur.conversationHistory = conversationHistory;
+      cur.lastInteractionId = lastInteractionId;
+      cur.updatedAt = Date.now();
+    }
+    localStorage.setItem("ISEKAI_SESSIONS", JSON.stringify(sessions));
+    localStorage.setItem("ISEKAI_ACTIVE_SESSION_ID", activeSessionId);
+
+    // 하위 호환성 단일 세션 백업
+    if (cur) {
+      localStorage.setItem("ISEKAI_SAVED_CHAT", JSON.stringify({
+        renderedMessages,
+        conversationHistory,
+        lastInteractionId,
+        updatedAt: cur.updatedAt,
+      }));
+    }
   } catch (e) {
-    console.error("대화 저장 실패:", e);
+    console.error("세션 저장 실패:", e);
   }
 }
 
 /**
- * 앱을 껐다 켰을 때 이전 대화 및 상태창 완벽 복원
+ * 앱을 껐다 켰을 때 이전 세션 목록 및 마지막 대화 완벽 복원
  */
 function loadChatFromStorage() {
   try {
-    const raw = localStorage.getItem("ISEKAI_SAVED_CHAT");
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-    if (!data.renderedMessages || data.renderedMessages.length === 0) return false;
+    // 1) 다중 세션 스토리지 확인
+    const sessionsRaw = localStorage.getItem("ISEKAI_SESSIONS");
+    if (sessionsRaw) {
+      sessions = JSON.parse(sessionsRaw);
+    }
 
-    chatMessagesEl.innerHTML = "";
-    renderedMessages = data.renderedMessages;
-    conversationHistory = data.conversationHistory || [];
-    lastInteractionId = data.lastInteractionId || null;
-
-    // 저장된 모든 메시지 복원
-    for (const msg of renderedMessages) {
-      if (msg.role === "user") {
-        const row = document.createElement("div");
-        row.className = "message-row user";
-        row.innerHTML = `<div class="bubble-user">${escapeHtml(msg.text)}</div>`;
-        chatMessagesEl.appendChild(row);
-      } else {
-        appendAssistantMessage(msg.text, msg.status, msg.choices, false);
+    // 2) 이전 구버전 단일 세션 데이터 자동 마이그레이션
+    if (!sessions || sessions.length === 0) {
+      const oldRaw = localStorage.getItem("ISEKAI_SAVED_CHAT");
+      if (oldRaw) {
+        const oldData = JSON.parse(oldRaw);
+        if (oldData.renderedMessages && oldData.renderedMessages.length > 0) {
+          const autoTitle = extractTitleFromMessages(oldData.renderedMessages) || "이전 시뮬레이션";
+          sessions = [{
+            id: "session_" + (oldData.updatedAt || Date.now()),
+            title: autoTitle,
+            createdAt: oldData.updatedAt || Date.now(),
+            updatedAt: oldData.updatedAt || Date.now(),
+            renderedMessages: oldData.renderedMessages,
+            conversationHistory: oldData.conversationHistory || [],
+            lastInteractionId: oldData.lastInteractionId || null,
+          }];
+        }
       }
     }
-    scrollToBottom();
+
+    if (!sessions || sessions.length === 0) {
+      return false;
+    }
+
+    // 활성 세션 결정 (저장된 ID 또는 첫 번째 세션)
+    const savedActiveId = localStorage.getItem("ISEKAI_ACTIVE_SESSION_ID");
+    const active = sessions.find((s) => s.id === savedActiveId) || sessions[0];
+    activeSessionId = active.id;
+
+    // 화면에 활성 세션 복원
+    renderActiveSession();
     return true;
   } catch (e) {
     console.error("대화 복원 실패:", e);
     return false;
   }
+}
+
+/**
+ * 활성 세션의 메시지들을 채팅 화면에 렌더링
+ */
+function renderActiveSession() {
+  const cur = getCurrentSession();
+  if (!cur) return;
+
+  chatMessagesEl.innerHTML = "";
+  renderedMessages = cur.renderedMessages || [];
+  conversationHistory = cur.conversationHistory || [];
+  lastInteractionId = cur.lastInteractionId || null;
+
+  for (const msg of renderedMessages) {
+    if (msg.role === "user") {
+      const row = document.createElement("div");
+      row.className = "message-row user";
+      row.innerHTML = `<div class="bubble-user">${escapeHtml(msg.text)}</div>`;
+      chatMessagesEl.appendChild(row);
+    } else {
+      appendAssistantMessage(msg.text, msg.status, msg.choices, false);
+    }
+  }
+  scrollToBottom();
+}
+
+/**
+ * 새 시뮬레이션 세션 생성 (+ 버튼 클릭 시 호출)
+ * 기존 세션을 안전하게 보존하고 깨끗한 새 대화방 생성
+ */
+function createNewSession(withToast = false) {
+  // 현재 세션 먼저 세이브
+  saveChatToStorage();
+
+  const newSession = {
+    id: "session_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+    title: "새 시뮬레이션",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    renderedMessages: [],
+    conversationHistory: [],
+    lastInteractionId: null,
+  };
+
+  sessions.unshift(newSession);
+  activeSessionId = newSession.id;
+
+  chatMessagesEl.innerHTML = "";
+  renderedMessages = [];
+  conversationHistory = [];
+  lastInteractionId = null;
+
+  // 온보딩 환영 메시지 생성 (세션에 자동 저장)
+  appendAssistantMessage(ONBOARDING_MESSAGE, null, [
+    "나루토 세계관으로 빙의",
+    "원피스 세계관으로 빙의",
+    "주술회전 세계관으로 빙의",
+  ], true);
+
+  saveChatToStorage();
+  closeDrawer();
+
+  if (withToast) {
+    chatInputEl.placeholder = "새 세계관 또는 캐릭터를 입력하세요...";
+    chatInputEl.focus();
+  }
+}
+
+/**
+ * 세션 전환 (대화 목록에서 항목 클릭)
+ */
+function switchSession(sessionId) {
+  if (sessionId === activeSessionId) {
+    closeDrawer();
+    return;
+  }
+  saveChatToStorage();
+  activeSessionId = sessionId;
+  localStorage.setItem("ISEKAI_ACTIVE_SESSION_ID", activeSessionId);
+  renderActiveSession();
+  closeDrawer();
+}
+
+/**
+ * 세션 삭제 (휴지통 아이콘 클릭)
+ */
+function deleteSession(sessionId, e) {
+  if (e) e.stopPropagation();
+
+  const target = sessions.find((s) => s.id === sessionId);
+  const title = target ? target.title : "시뮬레이션";
+
+  if (!confirm(`'${title}' 기록을 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  sessions = sessions.filter((s) => s.id !== sessionId);
+
+  if (sessions.length === 0) {
+    createNewSession(false);
+  } else {
+    if (activeSessionId === sessionId) {
+      activeSessionId = sessions[0].id;
+      renderActiveSession();
+    }
+    saveChatToStorage();
+  }
+
+  renderSessionList();
+}
+
+/**
+ * 사이드바 드로어 열기 및 세션 목록 동적 렌더링
+ */
+function openDrawer() {
+  renderSessionList();
+  if (drawerOverlayEl) drawerOverlayEl.classList.add("open");
+  if (drawerContentEl) drawerContentEl.classList.add("open");
+}
+
+function closeDrawer() {
+  if (drawerOverlayEl) drawerOverlayEl.classList.remove("open");
+  if (drawerContentEl) drawerContentEl.classList.remove("open");
+}
+
+function renderSessionList() {
+  if (!sessionListEl) return;
+  sessionListEl.innerHTML = "";
+
+  if (sessions.length === 0) {
+    sessionListEl.innerHTML = `<div style="text-align: center; color: var(--text-sub); font-size: 12px; padding: 24px 0;">대화 기록이 없습니다.</div>`;
+    return;
+  }
+
+  for (const session of sessions) {
+    const item = document.createElement("div");
+    item.className = "session-item" + (session.id === activeSessionId ? " active" : "");
+
+    const userTurns = (session.renderedMessages || []).filter((m) => m.role === "user").length;
+    const timeStr = formatRelativeTime(session.updatedAt || session.createdAt);
+
+    item.innerHTML = `
+      <div class="session-info">
+        <div class="session-item-title">${escapeHtml(session.title || "새 시뮬레이션")}</div>
+        <div class="session-item-sub">
+          <span>${timeStr}</span>
+          <span>•</span>
+          <span>진행 ${userTurns}턴</span>
+        </div>
+      </div>
+      <button class="session-delete-btn" title="삭제">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      </button>
+    `;
+
+    item.addEventListener("click", () => switchSession(session.id));
+
+    const delBtn = item.querySelector(".session-delete-btn");
+    if (delBtn) {
+      delBtn.addEventListener("click", (e) => deleteSession(session.id, e));
+    }
+
+    sessionListEl.appendChild(item);
+  }
+}
+
+function formatRelativeTime(ts) {
+  if (!ts) return "방금 전";
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "방금 전";
+  if (mins < 60) return `${mins}분 전`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}일 전`;
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function extractTitleFromMessages(msgs) {
+  if (!msgs) return null;
+  const userMsg = msgs.find((m) => m.role === "user");
+  if (!userMsg) return null;
+  return formatSessionTitle(userMsg.text);
+}
+
+function formatSessionTitle(raw) {
+  if (!raw) return "새 시뮬레이션";
+  let title = raw.trim()
+    .replace(/세계관(?:으로)?\s*빙의(?:할래|해줘|)?/g, "")
+    .replace(/빙의(?:할래|해줘|)?/g, "")
+    .trim();
+  if (title.length > 20) {
+    title = title.slice(0, 20) + "...";
+  }
+  return title || "시뮬레이션";
 }
 
 // =============================================================================
@@ -644,6 +895,12 @@ async function handleSend() {
     parts: [{ text }],
   });
 
+  // 세션 제목 자동 설정 (첫 사용자 턴인 경우)
+  const cur = getCurrentSession();
+  if (cur && (cur.title === "새 시뮬레이션" || !cur.title)) {
+    cur.title = formatSessionTitle(text);
+  }
+
   // 2) AI 응답용 임시 행 생성
   isGenerating = true;
   btnSendEl.disabled = true;
@@ -799,6 +1056,14 @@ async function handleSend() {
       status: status,
       choices: choices,
     });
+
+    // 상태창 빙의 캐릭터가 감지되면 세션 제목을 더 멋지게 갱신 (예: "거미입니다만 [시라오리]")
+    if (cur && status && status.빙의) {
+      const firstUserMsg = conversationHistory.find((h) => h.role === "user")?.parts?.[0]?.text;
+      const baseTitle = formatSessionTitle(firstUserMsg || cur.title);
+      cur.title = `${baseTitle} [${status.빙의}]`;
+    }
+
     saveChatToStorage();
 
     scrollToBottom();
