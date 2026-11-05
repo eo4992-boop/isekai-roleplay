@@ -11,11 +11,11 @@ const CHOICES_BLOCK_REGEX = /```(?:CHOICES|choices)\s*[\r\n]+([\s\S]*?)(?:```|$)
 const DIALOGUE_QUOTE_REGEX = /^["“「『]/;
 
 const STATUS_WINDOW_FIELDS = [
-  { key: "possession", icon: "👤", label: "빙의" },
-  { key: "equipment", icon: "🎒", label: "장비" },
-  { key: "ability", icon: "🌟", label: "능력" },
-  { key: "time", icon: "🕗", label: "시간" },
-  { key: "location", icon: "🌍", label: "장소" },
+  { key: "possession", icon: "👤", label: "빙의", aliases: ["빙의", "캐릭터", "이름", "인물", "신분", "플레이어"] },
+  { key: "equipment", icon: "🎒", label: "장비", aliases: ["장비", "소지품", "아이템", "의복", "소지"] },
+  { key: "ability", icon: "🌟", label: "능력", aliases: ["능력", "스킬", "특성", "마법", "기술"] },
+  { key: "time", icon: "🕗", label: "시간", aliases: ["시간", "날짜", "시각", "때", "일시"] },
+  { key: "location", icon: "🌍", label: "장소", aliases: ["장소", "위치", "현재 위치", "장소/위치"] },
 ];
 
 const THEME_ACCENTS = {
@@ -28,21 +28,26 @@ const THEME_ACCENTS = {
 };
 
 /**
- * 줄글에서 필드값 추출 (콜론, 별표, 불릿, 띄어쓰기 완벽 대응)
+ * 줄글에서 필드값 추출 (콜론, 별표, 불릿, 띄어쓰기 및 동의어 완벽 대응)
  */
 function parseFields(blockContent) {
   const result = {};
   const lines = blockContent.split("\n");
   for (const line of lines) {
     for (const field of STATUS_WINDOW_FIELDS) {
-      // "빙의:", "**빙의:**", "- 빙의 :", "• 빙의:" 등 모든 변형 매칭
-      const regex = new RegExp(`(?:^|[\\s*•\\-])${field.label}[*]*\\s*[:：]\\s*(.+)`, "i");
-      const match = line.match(regex);
-      if (match && match[1]) {
-        let val = match[1].trim();
-        // 대괄호 [ ... ] 나 끝의 별표 ** 정리
-        val = val.replace(/^\[(.*)\]$/, "$1").replace(/\*\*$/, "").trim();
-        if (val) result[field.key] = val;
+      if (result[field.key]) continue;
+      const labels = [field.label, ...(field.aliases || [])];
+      for (const lbl of labels) {
+        const regex = new RegExp(`(?:^|[\\s*•\\-])${lbl}[*]*\\s*[:：]\\s*(.+)`, "i");
+        const match = line.match(regex);
+        if (match && match[1]) {
+          let val = match[1].trim();
+          val = val.replace(/^\[(.*)\]$/, "$1").replace(/\*\*$/, "").trim();
+          if (val) {
+            result[field.key] = val;
+            break;
+          }
+        }
       }
     }
   }
@@ -74,13 +79,17 @@ function extractStatusWindow(text) {
     for (const line of lines) {
       let isStatusLine = false;
       for (const field of STATUS_WINDOW_FIELDS) {
-        const regex = new RegExp(`(?:^|[\\s*•\\-])${field.label}[*]*\\s*[:：]`, "i");
-        if (regex.test(line)) {
-          isStatusLine = true;
-          break;
+        const labels = [field.label, ...(field.aliases || [])];
+        for (const lbl of labels) {
+          const regex = new RegExp(`(?:^|[\\s*•\\-])${lbl}[*]*\\s*[:：]`, "i");
+          if (regex.test(line)) {
+            isStatusLine = true;
+            break;
+          }
         }
+        if (isStatusLine) break;
       }
-      if (!isStatusLine && !line.includes("상태창") && !line.includes("STATUS")) {
+      if (!isStatusLine && !line.includes("상태창") && !line.includes("STATUS") && !line.includes("INFO")) {
         preservedLines.push(line);
       }
     }
@@ -96,13 +105,14 @@ function extractStatusWindow(text) {
 function cleanLine(line) {
   return line
     .trim()
-    .replace(/^(?:\d+[.)]|[-•·*]|\([0-9]\)|[①-⑩])\s*/, "")
+    .replace(/^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s*/, "")
+    .replace(/^[-•·*]\s*/, "")
     .replace(/^\[(.*)\]$/, "$1")
     .trim();
 }
 
 /**
- * 선택지 3~5개 추출 (코드블록 형태 및 하단 1, 2, 3 번호 나열 형태 모두 지원)
+ * 선택지 3~5개 추출 (코드블록 형태, 번호 목록, 불릿 목록 모두 지원)
  */
 function extractChoices(text) {
   // 1) ```CHOICES ... ``` 코드블록이 있는 경우
@@ -119,7 +129,7 @@ function extractChoices(text) {
     }
   }
 
-  // 2) 코드블록 없이 본문 끝에 "1. ...", "2. ...", "3. ..." 형태로 적힌 경우 자동 감지
+  // 2) 코드블록 없이 본문 끝에 "1. ...", "2. ...", "* 1. ...", "- ..." 형태로 적힌 경우 자동 감지
   const lines = text.split("\n");
   const extractedChoices = [];
   const textLines = [];
@@ -127,9 +137,17 @@ function extractChoices(text) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    const isNumbered = /^(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/.test(line);
+    const isNumbered = /^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/.test(line);
+    const isChoiceHeader = /^(?:[#*•\-\s]*)(?:선택지|CHOICES?|행동\s*선택)(?:[:：\s*]*)$/i.test(line);
 
-    if (isNumbered) {
+    if (isChoiceHeader) {
+      choiceSectionStarted = true;
+      continue;
+    }
+
+    const isBulletChoice = choiceSectionStarted && /^[-•·*]\s+/.test(line);
+
+    if (isNumbered || isBulletChoice) {
       choiceSectionStarted = true;
       const cleaned = cleanLine(line);
       if (cleaned) extractedChoices.push(cleaned);
@@ -215,11 +233,26 @@ const SYSTEM_PROMPT = `당신은 '창작물 빙의 시뮬레이션(창·빙·시
      - "붉은 노을이 비추었다", "촛불이 흔들렸다", "창밖의 달빛만이..." 등 풍경이나 배경 묘사로 시선을 돌려 씬을 서둘러 끝맺거나 암전(Fade to black)시키지 마십시오.
   2. 【타임 스킵 및 일방적 결말 짓기 금지 (슬로우 템포 유지)】:
      - 한 턴 안에 상황을 혼자 끝까지 진행시켜 버리거나, "그렇게 밤이 깊어갔다/다음 날 아침" 처럼 시간을 건너뛰지 마십시오.
-     - 1초 1초 단위의 미세한 템포(Slow-burn)를 유지하며, 현재 진행 중인 밀접한 거리감, 맞닿은 체온, 손끝의 움직임, 눈맞춤까지만 실시간으로 묘사한 뒤 플레이어의 다음 행동을 기다리십시오.
+     - 1초 1초 단위의 미세한 템포(Slow-burn)를 유지하며, 현재 진행 중인 밀접한 거리감, 맞닿은 체온, 손끝의 움직임, 눈맞춤까지만 실시간으로 생생하게 서술하십시오.
   3. 【오감과 내면 심리 극대화】:
      - 직접적·해부학적인 단어 나열 대신, 인물들의 가빠지는 숨소리, 귓가에 닿는 뜨거운 호흡, 붉게 물든 귓가와 뺨, 심장 박동의 떨림, 억누르지 못하는 갈망과 망설임이 담긴 생생한 대사로 긴장감과 몰입감을 한 턴 한 턴 진득하게 이어가십시오.
   4. 【선택지(CHOICES) 몰입도 유지】:
-     - 제시하는 선택지 3개 또한 씬을 끝내거나 건너뛰는 내용이 아니라, 현재의 밀접한 신체적·감정적 상호작용을 한 단계 더 깊게 이어가는 행동들로 제시하십시오.`;
+     - 제시하는 선택지 3개 또한 씬을 끝내거나 건너뛰는 내용이 아니라, 현재의 밀접한 신체적·감정적 상호작용을 한 단계 더 깊게 이어가는 행동들로 제시하십시오.
+
+[출력 형식 절대 준수 규칙 (CRITICAL)]
+- 로맨스, 전투, 일상, 대화, 심층 서사 등 어떤 상황에서도 본문 출력 후 아래의 2) 상태창(\`\`\`INFO)과 3) 선택지(\`\`\`CHOICES)는 절대 생략할 수 없으며, 매 턴 반드시 100% 출력해야 합니다:
+\`\`\`INFO
+빙의: [빙의한 캐릭터]
+장비: [장비]
+능력: [능력]
+시간: [시간]
+장소: [장소]
+\`\`\`
+\`\`\`CHOICES
+1. [선택지 1]
+2. [선택지 2]
+3. [선택지 3]
+\`\`\``;
 
 // 원본 번들 String ID 8840, 8877 복원 온보딩 메시지
 const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
@@ -1131,29 +1164,58 @@ async function handleSend() {
     // 본문 최종 렌더링
     contentEl.innerHTML = renderMarkdown(finalText);
 
+    // 상태창 폴백: 만약 AI가 이번 턴에 상태창을 생략했더라도, 이전 턴에 확립된 상태창이 있다면 계승
+    let effectiveStatus = status;
+    if (!effectiveStatus) {
+      for (let i = renderedMessages.length - 1; i >= 0; i--) {
+        if (renderedMessages[i].role === "assistant" && renderedMessages[i].status) {
+          effectiveStatus = { ...renderedMessages[i].status };
+          break;
+        }
+      }
+    }
+
     // 상태창 카드 렌더링
-    if (status) {
-      const cardEl = renderStatusCard(status);
+    if (effectiveStatus) {
+      const cardEl = renderStatusCard(effectiveStatus);
       bubble.appendChild(cardEl);
     }
 
+    // 선택지 폴백: 만약 AI가 선택지를 전혀 출력하지 않았다면, 인터랙션이 끊기지 않도록 상황 대안 3개 자동 보충
+    let effectiveChoices = choices;
+    if (!effectiveChoices || effectiveChoices.length === 0) {
+      effectiveChoices = [
+        "상황을 더 지켜보며 대화를 이어간다",
+        "적극적으로 다음 행동을 취한다",
+        "주변 상황을 살피며 거리를 둔다",
+      ];
+    }
+
     // 선택지 버튼 렌더링
-    if (choices && choices.length > 0) {
-      const choicesEl = renderChoices(choices);
+    if (effectiveChoices && effectiveChoices.length > 0) {
+      const choicesEl = renderChoices(effectiveChoices);
       bubble.appendChild(choicesEl);
     }
 
-    // AI 응답 히스토리에 누적
+    // AI 응답 히스토리에 누적 (다음 턴에서 AI가 상태창과 선택지 형식을 잊지 않도록 코드블록 보정 누적)
+    let historyText = accumulatedText;
+    if (!status && effectiveStatus) {
+      historyText += `\n\n\`\`\`INFO\n빙의: ${effectiveStatus.possession || ""}\n장비: ${effectiveStatus.equipment || ""}\n능력: ${effectiveStatus.ability || ""}\n시간: ${effectiveStatus.time || ""}\n장소: ${effectiveStatus.location || ""}\n\`\`\``;
+    }
+    if ((!choices || choices.length === 0) && effectiveChoices) {
+      historyText += `\n\n\`\`\`CHOICES\n1. ${effectiveChoices[0]}\n2. ${effectiveChoices[1]}\n3. ${effectiveChoices[2]}\n\`\`\``;
+    }
+
     conversationHistory.push({
       role: "model",
-      parts: [{ text: accumulatedText }],
+      parts: [{ text: historyText }],
     });
 
     renderedMessages.push({
       role: "assistant",
       text: finalText,
-      status: status,
-      choices: choices,
+      status: effectiveStatus,
+      choices: effectiveChoices,
     });
 
     // 상태창 빙의 캐릭터가 감지되면 세션 제목을 더 멋지게 갱신 (예: "거미입니다만 [시라오리]")
