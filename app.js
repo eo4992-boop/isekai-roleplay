@@ -194,6 +194,9 @@ const SYSTEM_PROMPT = `당신은 '창작물 빙의 시뮬레이션(창·빙·시
   - 레이카로서 솔직하고 친절하게 도움을 요청하십시오:
     "**레이카|** 죄송해요 플레이어님! 제가 아직 '{작품명}'에 대한 자세한 기억 데이터가 부족해요. 😢
     하지만 플레이어님께서 이 작품의 **간단한 줄거리나 주요 인물, 또는 나무위키 소개글**을 채팅창에 복사해서 툭 던져주시면, 제가 바로 흡수해서 완벽하게 빙의를 시작해 드릴 수 있어요! 혹시 어떤 세계관인지 살짝만 알려주실 수 있으신가요?"
+- 원작 텍스트 직접 복제 절대 금지 (구글 저작권 RECITATION 필터 중단 방지):
+  - 원작 소설이나 만화의 실제 출판된 첫 문장, 도입부 서술, 본문 구절을 토씨 하나 틀리지 않고 그대로 읊지(Recite) 마십시오. (구글 API의 저작권 필터가 감지하여 출력이 도중에 '가'나 한 글자에서 강제 중단됩니다.)
+  - 원작의 세계관과 고증은 완벽히 반영하되, 반드시 **레이카의 재치 있는 어조와 당신 자신의 생생한 표현으로 새롭게 각색·요약·재구성하여 서술**하십시오.
 
 [스토리 진행 필수 양식]
 플레이어가 작품명을 말하거나 행동을 입력하면, 스토리를 생생하게 진행하며 매 턴 반드시 아래 3단계를 순서대로 출력하세요:
@@ -1078,6 +1081,12 @@ async function handleSend() {
         },
         contents: conversationHistory,
         generationConfig: genConfig,
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
       };
 
       try {
@@ -1113,6 +1122,7 @@ async function handleSend() {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    let lastFinishReason = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1134,6 +1144,12 @@ async function handleSend() {
             if (data.interaction && data.interaction.id) {
               lastInteractionId = data.interaction.id;
             }
+
+            // 구글 안전/저작권 필터에 의한 강제 중단 여부 추적
+            if (data.candidates?.[0]?.finishReason) {
+              lastFinishReason = data.candidates[0].finishReason;
+            }
+
             let chunk = "";
             if (data.event_type === "step.delta" && data.delta && data.delta.type === "text") {
               chunk = data.delta.text;
@@ -1159,7 +1175,14 @@ async function handleSend() {
 
     // 스트리밍 완료 후: 상태창 및 선택지 정밀 파싱
     const { text: textWithoutStatus, status } = extractStatusWindow(accumulatedText);
-    const { text: finalText, choices } = extractChoices(textWithoutStatus);
+    let { text: finalText, choices } = extractChoices(textWithoutStatus);
+
+    // 필터 중단 감지 시 친절한 안내 및 이어가기 유도
+    if (lastFinishReason === "RECITATION") {
+      finalText += "\n\n*(💡 원작 본문 복제 감지로 출력이 일시 중단되었습니다. 하단의 '▶️ 계속' 버튼을 누르시면 이어서 진행됩니다.)*";
+    } else if (lastFinishReason === "SAFETY") {
+      finalText += "\n\n*(💡 안전 필터 감지로 출력이 일시 중단되었습니다. 하단의 '▶️ 계속' 버튼을 누르시면 이어서 진행됩니다.)*";
+    }
 
     // 본문 최종 렌더링
     contentEl.innerHTML = renderMarkdown(finalText);
