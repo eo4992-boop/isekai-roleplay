@@ -360,9 +360,10 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-// v2.0 마이그레이션: 불안정한 flash-lite나 구버전 모델은 무조건 가장 안정적인 gemini-3.5-flash로 강제 마이그레이션
-if (!savedModel || savedModel.includes("lite") || savedModel.includes("3.6") || savedModel.includes("3.8") || savedModel !== "gemini-3.5-flash") {
-  savedModel = "gemini-3.5-flash";
+// v2.3 마이그레이션: 존재하지 않는 임시 모델(3.5 등) 및 구버전 설정을 공식 안정 모델(gemini-2.5-flash)로 강제 갱신
+const VALID_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest"];
+if (!savedModel || savedModel.includes("3.5") || savedModel.includes("3.6") || savedModel.includes("3.8") || !VALID_MODELS.includes(savedModel)) {
+  savedModel = "gemini-2.5-flash";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
 let selectedModel = savedModel;
@@ -1133,10 +1134,16 @@ async function handleSend() {
     // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도 루프
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 안정 모델(gemini-3.5-flash)로 충분한 백오프 간격을 두고 재시도
-        currentAttemptModel = "gemini-3.5-flash";
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 스트리밍 연결 끊김 감지 -> 안정 모델(gemini-3.5-flash)로 자동 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
-        await new Promise((r) => setTimeout(r, 2200));
+        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 공식 대체 모델로 지능적 순환 전환
+        if (selectedModel === "gemini-2.5-flash") {
+          currentAttemptModel = attempt === 1 ? "gemini-2.0-flash" : "gemini-flash-lite-latest";
+        } else if (selectedModel === "gemini-2.0-flash") {
+          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-flash-lite-latest";
+        } else {
+          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-2.0-flash";
+        }
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 스트리밍 재연결 중 -> 대체 모델(${currentAttemptModel.replace("gemini-", "")})로 자동 전환 (${attempt}/${maxRetries - 1})...</div>`;
+        await new Promise((r) => setTimeout(r, 2000));
       }
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentAttemptModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
@@ -1199,6 +1206,10 @@ async function handleSend() {
               try {
                 const data = JSON.parse(jsonStr);
 
+                if (data.error) {
+                  throw new Error(`Google API 오류: ${data.error.message || JSON.stringify(data.error)}`);
+                }
+
                 if (data.interaction && data.interaction.id) {
                   lastInteractionId = data.interaction.id;
                 }
@@ -1224,7 +1235,9 @@ async function handleSend() {
                   contentEl.innerHTML = renderMarkdown(visibleStreamText);
                   scrollToBottom();
                 }
-              } catch (e) {}
+              } catch (e) {
+                if (e.message && e.message.includes("Google API 오류")) throw e;
+              }
             }
           }
         }
@@ -1252,6 +1265,11 @@ async function handleSend() {
         lastErr = err.message;
         if (attempt === maxRetries - 1) throw err;
       }
+    }
+
+    // 본문 수신 검증: 3회 재시도 후에도 수신된 본문이 전무하다면 유령 말풍선 대신 명확한 에러 안내
+    if (!accumulatedText || accumulatedText.trim().length === 0) {
+      throw new Error(lastErr || "구글 서버로부터 응답을 수신하지 못했습니다. (API 키 권한 또는 네트워크 상태를 확인해주세요)");
     }
 
     // 스트리밍 완료 후: 상태창 및 선택지 정밀 상호 독립 파싱
