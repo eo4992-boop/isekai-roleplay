@@ -1066,10 +1066,10 @@ async function handleSend() {
     // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도 루프
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 무조건 가장 안정적인 gemini-3.5-flash로 전환
+        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 안정 모델(gemini-3.5-flash)로 충분한 백오프 간격을 두고 재시도
         currentAttemptModel = "gemini-3.5-flash";
         contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 스트리밍 연결 끊김 감지 -> 안정 모델(gemini-3.5-flash)로 자동 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 2200));
       }
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentAttemptModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
@@ -1077,10 +1077,6 @@ async function handleSend() {
         temperature: 0.85,
         maxOutputTokens: 3000,
       };
-      // 3.5-flash는 Thinking Budget 0 설정으로 0.3초 즉답 실현
-      if (currentAttemptModel.includes("3.5") || currentAttemptModel.includes("3.8") || !currentAttemptModel.includes("lite")) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
-      }
 
       const payload = {
         systemInstruction: {
@@ -1167,9 +1163,14 @@ async function handleSend() {
         }
 
         // [중단 및 미완성 응답 정밀 검증 (CRITICAL)]
+        // 안전/저작권 필터에 의한 중단인 경우 재시도하지 않고 바로 완료 안내로 분기
+        if (lastFinishReason === "RECITATION" || lastFinishReason === "SAFETY") {
+          break;
+        }
+
         // 구글 서버 소켓 강제 종료로 인해 문장이 중간에 잘려 끝났는지 정밀 검사:
-        // 1) lastFinishReason이 'STOP'이 아닌 경우 (소켓이 도중에 닫힌 경우 null 또는 기타 이유)
-        // 2) 출력이 200자 미만이거나, ```CHOICES 코드블록 및 1./2./3. 선택지가 아예 도달하지 못한 경우
+        // 1) lastFinishReason이 'STOP'이 아닌 경우 (소켓이 도중에 닫힌 경우 null 또는 빈값)
+        // 2) 또는 ```CHOICES 선택지 블록이 아예 도달하지 못했거나 250자 미만인 경우
         const hasChoices = accumulatedText.toLowerCase().includes("choices") || /^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/m.test(accumulatedText);
         const isPrematureEnd = (!lastFinishReason || lastFinishReason !== "STOP") && (!hasChoices || accumulatedText.trim().length < 250);
 
