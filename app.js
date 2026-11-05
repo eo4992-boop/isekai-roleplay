@@ -198,10 +198,12 @@ const SYSTEM_PROMPT = `당신은 '창작물 빙의 시뮬레이션(창·빙·시
   - 원작 소설이나 만화의 실제 출판된 첫 문장, 도입부 서술, 본문 구절을 토씨 하나 틀리지 않고 그대로 읊지(Recite) 마십시오. (구글 API의 저작권 필터가 감지하여 출력이 도중에 '가'나 한 글자에서 강제 중단됩니다.)
   - 원작의 세계관과 고증은 완벽히 반영하되, 반드시 **레이카의 재치 있는 어조와 당신 자신의 생생한 표현으로 새롭게 각색·요약·재구성하여 서술**하십시오.
 
-[스토리 진행 필수 양식]
-플레이어가 작품명을 말하거나 행동을 입력하면, 스토리를 생생하게 진행하며 매 턴 반드시 아래 3단계를 순서대로 출력하세요:
+[스토리 진행 필수 양식 및 서술 분량 지침]
+플레이어가 작품명을 말하거나 행동을 입력하면, 스토리를 생생하게 진행하며 매 턴 반드시 아래 3단계를 순서대로 빠짐없이 출력하세요:
 
-1. 스토리 본문:
+1. 스토리 본문 (풍부한 서사와 완성도 필수):
+- 반드시 최소 3~5개 문단 이상으로 상황, 배경, 인물의 오감, 심리와 주변 반응을 풍부하고 밀도 있게 서술하십시오.
+- 절대로 한두 문장이나 쉼표(,) 등 미완성 문장으로 서술을 멈추고 상태창으로 넘어가지 마십시오. 서사를 충분히 진전시킨 후 상태창과 선택지로 이어져야 합니다.
 - 인물 대사는 "**이름|** 대사" 형식으로 작성하고, 나레이션/지문은 따옴표 없이 생생히 묘사합니다.
 - 플레이어의 행동을 AI가 멋대로 결정하지 말고 주변 반응과 상황만 서술한 뒤 선택을 기다립니다.
 
@@ -291,7 +293,8 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-if (!savedModel || savedModel.includes("3.6") || savedModel === "gemini-3.8-flash" || savedModel === "gemini-flash-lite-latest") {
+// v2.0 마이그레이션: 불안정한 flash-lite나 구버전 모델은 무조건 가장 안정적인 gemini-3.5-flash로 강제 마이그레이션
+if (!savedModel || savedModel.includes("lite") || savedModel.includes("3.6") || savedModel.includes("3.8") || savedModel !== "gemini-3.5-flash") {
   savedModel = "gemini-3.5-flash";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
@@ -1060,13 +1063,13 @@ async function handleSend() {
     let lastErr = null;
     const maxRetries = 3;
 
-    // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도/대체모델 루프
+    // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도 루프
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        // 구글 서버 트래픽 스파이크로 끊긴 경우, 상호 보완 모델(gemini-3.5-flash <-> flash-lite)로 자동 전환
-        currentAttemptModel = currentAttemptModel === "gemini-flash-lite-latest" ? "gemini-3.5-flash" : "gemini-flash-lite-latest";
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 서버 트래픽 혼잡 감지 -> 안정 모델(${currentAttemptModel.replace("gemini-", "")})로 자동 전환 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
-        await new Promise((r) => setTimeout(r, 1200));
+        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 무조건 가장 안정적인 gemini-3.5-flash로 전환
+        currentAttemptModel = "gemini-3.5-flash";
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 스트리밍 연결 끊김 감지 -> 안정 모델(gemini-3.5-flash)로 자동 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
+        await new Promise((r) => setTimeout(r, 1000));
       }
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentAttemptModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
@@ -1074,7 +1077,7 @@ async function handleSend() {
         temperature: 0.85,
         maxOutputTokens: 3000,
       };
-      // 3.5-flash 또는 lite 이외 모델은 Thinking Budget 0 강제 적용으로 1초 즉답 실현
+      // 3.5-flash는 Thinking Budget 0 설정으로 0.3초 즉답 실현
       if (currentAttemptModel.includes("3.5") || currentAttemptModel.includes("3.8") || !currentAttemptModel.includes("lite")) {
         genConfig.thinkingConfig = { thinkingBudget: 0 };
       }
@@ -1163,9 +1166,15 @@ async function handleSend() {
           }
         }
 
-        // 만약 구글 서버 과부하로 몇 글자(예: 60자 미만)만 나오고 스트림이 비정상 종료된 경우 자동 재시도
-        if (accumulatedText.trim().length < 60 && lastFinishReason !== "STOP" && attempt < maxRetries - 1) {
-          console.warn("스트림 중간 끊김 감지 -> 대체 모델로 자동 재시도");
+        // [중단 및 미완성 응답 정밀 검증 (CRITICAL)]
+        // 구글 서버 소켓 강제 종료로 인해 문장이 중간에 잘려 끝났는지 정밀 검사:
+        // 1) lastFinishReason이 'STOP'이 아닌 경우 (소켓이 도중에 닫힌 경우 null 또는 기타 이유)
+        // 2) 출력이 200자 미만이거나, ```CHOICES 코드블록 및 1./2./3. 선택지가 아예 도달하지 못한 경우
+        const hasChoices = accumulatedText.toLowerCase().includes("choices") || /^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/m.test(accumulatedText);
+        const isPrematureEnd = (!lastFinishReason || lastFinishReason !== "STOP") && (!hasChoices || accumulatedText.trim().length < 250);
+
+        if (isPrematureEnd && attempt < maxRetries - 1) {
+          console.warn(`스트림 미완성 종료 감지 (finishReason: ${lastFinishReason}, len: ${accumulatedText.length}) -> 자동 재시도`);
           continue;
         }
 
