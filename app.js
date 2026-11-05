@@ -291,8 +291,8 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-if (!savedModel || savedModel.includes("3.6") || savedModel.includes("3.5-flash") || savedModel === "gemini-3.8-flash") {
-  savedModel = "gemini-flash-lite-latest";
+if (!savedModel || savedModel.includes("3.6") || savedModel === "gemini-3.8-flash" || savedModel === "gemini-flash-lite-latest") {
+  savedModel = "gemini-3.5-flash";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
 let selectedModel = savedModel;
@@ -1053,25 +1053,29 @@ async function handleSend() {
   scrollToBottom();
 
   let accumulatedText = "";
+  let lastFinishReason = null;
+  let currentAttemptModel = selectedModel;
 
   try {
-    let response = null;
     let lastErr = null;
     const maxRetries = 3;
 
-    // 일시적인 503/429 트래픽 스파이크를 자동으로 극복하는 지능형 재시도 루프
+    // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도/대체모델 루프
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 서버 트래픽 혼잡 감지 -> 1.5초 후 자동 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
-        await new Promise((r) => setTimeout(r, 1500));
+        // 구글 서버 트래픽 스파이크로 끊긴 경우, 상호 보완 모델(gemini-3.5-flash <-> flash-lite)로 자동 전환
+        currentAttemptModel = currentAttemptModel === "gemini-flash-lite-latest" ? "gemini-3.5-flash" : "gemini-flash-lite-latest";
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 서버 트래픽 혼잡 감지 -> 안정 모델(${currentAttemptModel.replace("gemini-", "")})로 자동 전환 재시도 중 (${attempt}/${maxRetries - 1})...</div>`;
+        await new Promise((r) => setTimeout(r, 1200));
       }
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentAttemptModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       const genConfig = {
         temperature: 0.85,
         maxOutputTokens: 3000,
       };
-      if (!selectedModel.includes("lite")) {
+      // 3.5-flash 또는 lite 이외 모델은 Thinking Budget 0 강제 적용으로 1초 즉답 실현
+      if (currentAttemptModel.includes("3.5") || currentAttemptModel.includes("3.8") || !currentAttemptModel.includes("lite")) {
         genConfig.thinkingConfig = { thinkingBudget: 0 };
       }
 
@@ -1090,86 +1094,86 @@ async function handleSend() {
       };
 
       try {
-        response = await fetch(endpoint, {
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
 
-        if (response.ok) {
-          break; // 통신 성공 -> 스트리밍 개시
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => null);
+          lastErr = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
+          if (response.status === 503 || response.status === 429 || lastErr.includes("high demand") || lastErr.includes("overloaded")) {
+            continue;
+          } else {
+            throw new Error(lastErr);
+          }
         }
 
-        const errJson = await response.json().catch(() => null);
-        lastErr = (errJson && errJson.error && errJson.error.message) || `HTTP ${response.status} 오류`;
+        // 스트리밍 데이터 수신
+        accumulatedText = "";
+        lastFinishReason = null;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
 
-        // 503(High Demand) 또는 429(Rate Limit) 일시적 에러는 재시도
-        if (response.status === 503 || response.status === 429 || lastErr.includes("high demand") || lastErr.includes("overloaded")) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("data: ")) {
+              const jsonStr = trimmed.slice(6);
+              if (jsonStr === "[DONE]") continue;
+              try {
+                const data = JSON.parse(jsonStr);
+
+                if (data.interaction && data.interaction.id) {
+                  lastInteractionId = data.interaction.id;
+                }
+
+                if (data.candidates?.[0]?.finishReason) {
+                  lastFinishReason = data.candidates[0].finishReason;
+                }
+
+                let chunk = "";
+                if (data.event_type === "step.delta" && data.delta && data.delta.type === "text") {
+                  chunk = data.delta.text;
+                } else if (data.candidates?.[0]?.content?.parts) {
+                  for (const part of data.candidates[0].content.parts) {
+                    if (part.text && !part.thought) {
+                      chunk += part.text;
+                    }
+                  }
+                }
+
+                if (chunk) {
+                  accumulatedText += chunk;
+                  const visibleStreamText = stripTrailingBlocksForStreaming(accumulatedText);
+                  contentEl.innerHTML = renderMarkdown(visibleStreamText);
+                  scrollToBottom();
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        // 만약 구글 서버 과부하로 몇 글자(예: 60자 미만)만 나오고 스트림이 비정상 종료된 경우 자동 재시도
+        if (accumulatedText.trim().length < 60 && lastFinishReason !== "STOP" && attempt < maxRetries - 1) {
+          console.warn("스트림 중간 끊김 감지 -> 대체 모델로 자동 재시도");
           continue;
-        } else {
-          throw new Error(lastErr);
         }
+
+        // 성공적으로 스트리밍 완료
+        break;
       } catch (err) {
         lastErr = err.message;
         if (attempt === maxRetries - 1) throw err;
-      }
-    }
-
-    if (!response || !response.ok) {
-      throw new Error(lastErr || "구글 서버 응답 오류");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let lastFinishReason = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("data: ")) {
-          const jsonStr = trimmed.slice(6);
-          if (jsonStr === "[DONE]") continue;
-          try {
-            const data = JSON.parse(jsonStr);
-
-            // 1) Interactions API 이벤트 처리
-            if (data.interaction && data.interaction.id) {
-              lastInteractionId = data.interaction.id;
-            }
-
-            // 구글 안전/저작권 필터에 의한 강제 중단 여부 추적
-            if (data.candidates?.[0]?.finishReason) {
-              lastFinishReason = data.candidates[0].finishReason;
-            }
-
-            let chunk = "";
-            if (data.event_type === "step.delta" && data.delta && data.delta.type === "text") {
-              chunk = data.delta.text;
-            } else if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-              // 2) 클래식 API 처리
-              chunk = data.candidates[0].content.parts[0].text;
-            }
-
-            if (chunk) {
-              accumulatedText += chunk;
-
-              // 스트리밍 도중에는 ```INFO, ```CHOICES 코드블록이 열린 채 노출되지 않도록 마스킹
-              const visibleStreamText = stripTrailingBlocksForStreaming(accumulatedText);
-              contentEl.innerHTML = renderMarkdown(visibleStreamText);
-              scrollToBottom();
-            }
-          } catch (e) {
-            // JSON 파싱 경계 무시
-          }
-        }
       }
     }
 
