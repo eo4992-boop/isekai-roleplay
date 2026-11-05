@@ -6,8 +6,8 @@
 // =============================================================================
 // 1. 역공학으로 복원한 파서 상수 및 함수들 (어떤 형식으로 출력되어도 100% 감지)
 // =============================================================================
-const INFO_BLOCK_REGEX = /```(?:INFO|info|status|STATUS)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
-const CHOICES_BLOCK_REGEX = /```(?:CHOICES|choices)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
+const INFO_BLOCK_REGEX = /```(?:INFO|info|status|STATUS|상태창)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
+const CHOICES_BLOCK_REGEX = /```(?:CHOICES?|choices?|선택지?|options?|actions?|행동)\s*[\r\n]+([\s\S]*?)(?:```|$)/i;
 const DIALOGUE_QUOTE_REGEX = /^["“「『]/;
 
 const STATUS_WINDOW_FIELDS = [
@@ -55,127 +55,191 @@ function parseFields(blockContent) {
 }
 
 /**
- * 상태창 데이터 추출 (코드블록 형태 및 일반 텍스트 목록 형태 모두 지원)
+ * 선택지 텍스트 정제 (마크다운 볼드, 번호, 기호 말끔히 제거)
  */
-function extractStatusWindow(text) {
-  // 1) ```INFO ... ``` 코드블록이 있는 경우
-  const blockMatch = text.match(INFO_BLOCK_REGEX);
-  if (blockMatch && blockMatch.index !== undefined) {
-    const cleanedText = (text.slice(0, blockMatch.index) + text.slice(blockMatch.index + blockMatch[0].length)).trim();
-    const fields = parseFields(blockMatch[1]);
-    const hasAny = Object.values(fields).some(Boolean);
-    if (hasAny) {
-      return { text: cleanedText, status: fields };
+function cleanChoiceText(line) {
+  let s = line.trim();
+  s = s.replace(/^>\s*/, "");
+  // Markdown bold/italic around numbering: **1.** or **1)** or *1.* or [1] or 선택지 1:
+  s = s.replace(/^(?:[-•·*]\s*)?(?:\*\*|\*|__)?(?:선택지\s*\d*[:.]?|\d+[.)]|\([0-9]\)|\[[0-9]\]|[①-⑩])(?:\*\*|\*|__)?\s*[:：.\-]?\s*/i, "");
+  s = s.replace(/^[-•·*]\s*/, "");
+  s = s.replace(/^\[(.*)\]$/, "$1");
+  // 양 끝에 남은 볼드/이탤릭 기호 제거
+  s = s.replace(/^\*+|\*+$/g, "").replace(/^_+|_+$/g, "").trim();
+  return s;
+}
+
+function isChoiceLine(line) {
+  const trimmed = line.trim().replace(/^>\s*/, "");
+  if (!trimmed) return false;
+  const numRegex = /^(?:[-•·*]\s*)?(?:\*\*|\*|__)?(?:선택지\s*\d*[:.]?|\d+[.)]|\([0-9]\)|\[[0-9]\]|[①-⑩])(?:\*\*|\*|__)?\s*[:：.\-]?\s+\S+/i;
+  return numRegex.test(trimmed);
+}
+
+function isChoiceHeaderLine(line) {
+  const trimmed = line.trim();
+  return /^(?:[#*•\-\s\[(【<◈◆▶])*(?:선택지|추천\s*선택지|행동\s*선택|CHOICES?|OPTIONS?|ACTIONS?)(?:[\])】>:\s*]*)$/i.test(trimmed);
+}
+
+/**
+ * 상태창과 선택지를 상호 충돌 없이 완벽하게 분리 추출하는 파서 (Func 19559 + 19560 진화형)
+ */
+function parseTurnOutput(rawText) {
+  let text = rawText;
+  let extractedStatus = null;
+  let extractedChoices = [];
+
+  // 1) ```CHOICES ... ``` 코드블록 먼저 확인
+  const choiceBlockMatch = text.match(CHOICES_BLOCK_REGEX);
+  if (choiceBlockMatch && choiceBlockMatch.index !== undefined) {
+    const rawLines = choiceBlockMatch[1].split("\n");
+    const found = rawLines.map(cleanChoiceText).filter((l) => l.length > 0).slice(0, 5);
+    if (found.length >= 2) {
+      extractedChoices = found;
+      // 본문에서 CHOICES 코드블록 영역 깔끔하게 제거
+      text = (text.slice(0, choiceBlockMatch.index) + text.slice(choiceBlockMatch.index + choiceBlockMatch[0].length)).trim();
     }
   }
 
-  // 2) 코드블록 태그 없이 본문 안에 "빙의:", "장비:", "능력:" 등으로 나열된 경우 자동 감지
-  const looseFields = parseFields(text);
-  const matchedFieldCount = Object.keys(looseFields).length;
-  if (matchedFieldCount >= 2) {
-    // 본문에서 상태창에 해당하는 줄들만 깔끔하게 제거
+  // 2) ```INFO ... ``` 코드블록 확인
+  const infoBlockMatch = text.match(INFO_BLOCK_REGEX);
+  if (infoBlockMatch && infoBlockMatch.index !== undefined) {
+    const fields = parseFields(infoBlockMatch[1]);
+    if (Object.values(fields).some(Boolean)) {
+      extractedStatus = fields;
+    }
+    // 만약 INFO 블록 안에 선택지가 함께 적혀있었을 경우 구출
+    if (extractedChoices.length === 0) {
+      const infoLines = infoBlockMatch[1].split("\n");
+      const foundInInfo = [];
+      for (const l of infoLines) {
+        if (isChoiceLine(l)) foundInInfo.push(cleanChoiceText(l));
+      }
+      if (foundInInfo.length >= 2) extractedChoices = foundInInfo.slice(0, 5);
+    }
+    // 본문에서 INFO 코드블록 영역 깔끔하게 제거
+    text = (text.slice(0, infoBlockMatch.index) + text.slice(infoBlockMatch.index + infoBlockMatch[0].length)).trim();
+  }
+
+  // 3) 코드블록 없이 본문 끝에 번호 목록으로 선택지가 적힌 경우
+  if (extractedChoices.length === 0) {
     const lines = text.split("\n");
     const preservedLines = [];
-    for (const line of lines) {
-      let isStatusLine = false;
-      for (const field of STATUS_WINDOW_FIELDS) {
-        const labels = [field.label, ...(field.aliases || [])];
-        for (const lbl of labels) {
-          const regex = new RegExp(`(?:^|[\\s*•\\-])${lbl}[*]*\\s*[:：]`, "i");
-          if (regex.test(line)) {
-            isStatusLine = true;
-            break;
-          }
-        }
-        if (isStatusLine) break;
+    const foundChoices = [];
+    let choiceSectionStarted = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (isChoiceHeaderLine(line)) {
+        choiceSectionStarted = true;
+        continue;
       }
-      if (!isStatusLine && !line.includes("상태창") && !line.includes("STATUS") && !line.includes("INFO")) {
-        preservedLines.push(line);
-      }
-    }
-    return { text: preservedLines.join("\n").trim(), status: looseFields };
-  }
-
-  return { text, status: null };
-}
-
-/**
- * 선택지 불릿/번호 정제
- */
-function cleanLine(line) {
-  return line
-    .trim()
-    .replace(/^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s*/, "")
-    .replace(/^[-•·*]\s*/, "")
-    .replace(/^\[(.*)\]$/, "$1")
-    .trim();
-}
-
-/**
- * 선택지 3~5개 추출 (코드블록 형태, 번호 목록, 불릿 목록 모두 지원)
- */
-function extractChoices(text) {
-  // 1) ```CHOICES ... ``` 코드블록이 있는 경우
-  const blockMatch = text.match(CHOICES_BLOCK_REGEX);
-  if (blockMatch && blockMatch.index !== undefined) {
-    const cleanedText = (text.slice(0, blockMatch.index) + text.slice(blockMatch.index + blockMatch[0].length)).trim();
-    const rawLines = blockMatch[1].split("\n");
-    const choices = rawLines
-      .map(cleanLine)
-      .filter((l) => l.length > 0)
-      .slice(0, 5);
-    if (choices.length > 0) {
-      return { text: cleanedText, choices };
-    }
-  }
-
-  // 2) 코드블록 없이 본문 끝에 "1. ...", "2. ...", "* 1. ...", "- ..." 형태로 적힌 경우 자동 감지
-  const lines = text.split("\n");
-  const extractedChoices = [];
-  const textLines = [];
-  let choiceSectionStarted = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    const isNumbered = /^(?:[-•·*]\s*)?(?:\d+[.)]|\([0-9]\)|[①-⑩])\s+/.test(line);
-    const isChoiceHeader = /^(?:[#*•\-\s]*)(?:선택지|CHOICES?|행동\s*선택)(?:[:：\s*]*)$/i.test(line);
-
-    if (isChoiceHeader) {
-      choiceSectionStarted = true;
-      continue;
-    }
-
-    const isBulletChoice = choiceSectionStarted && /^[-•·*]\s+/.test(line);
-
-    if (isNumbered || isBulletChoice) {
-      choiceSectionStarted = true;
-      const cleaned = cleanLine(line);
-      if (cleaned) extractedChoices.push(cleaned);
-    } else if (choiceSectionStarted && line === "") {
-      // 선택지 사이 공백 건너뜀
-      continue;
-    } else {
-      if (choiceSectionStarted && extractedChoices.length >= 2) {
-        // 선택지 영역이 끝난 후 나머지 텍스트
-        textLines.push(line);
+      if (isChoiceLine(line) || (choiceSectionStarted && /^[-•·*]\s+/.test(line.trim()))) {
+        choiceSectionStarted = true;
+        const cleaned = cleanChoiceText(line);
+        if (cleaned) foundChoices.push(cleaned);
+      } else if (choiceSectionStarted && line.trim() === "") {
+        continue;
       } else {
-        textLines.push(lines[i]);
+        if (choiceSectionStarted && foundChoices.length >= 2) {
+          preservedLines.push(line);
+        } else {
+          preservedLines.push(lines[i]);
+        }
       }
+    }
+
+    if (foundChoices.length >= 2) {
+      extractedChoices = foundChoices.slice(0, 5);
+      text = preservedLines.join("\n").trim();
     }
   }
 
-  if (extractedChoices.length >= 2) {
-    return { text: textLines.join("\n").trim(), choices: extractedChoices.slice(0, 5) };
+  // 4) 코드블록 없이 줄글로 "빙의:", "장비:" 등이 나열된 느슨한 상태창 감지
+  if (!extractedStatus) {
+    const looseFields = parseFields(text);
+    if (Object.keys(looseFields).length >= 2) {
+      extractedStatus = looseFields;
+      const lines = text.split("\n");
+      const preservedLines = [];
+      for (const line of lines) {
+        let isStatusLine = false;
+        for (const field of STATUS_WINDOW_FIELDS) {
+          const labels = [field.label, ...(field.aliases || [])];
+          for (const lbl of labels) {
+            if (new RegExp(`(?:^|[\\s*•\\-])${lbl}[*]*\\s*[:：]`, "i").test(line)) {
+              isStatusLine = true;
+              break;
+            }
+          }
+          if (isStatusLine) break;
+        }
+        if (!isStatusLine && !line.includes("상태창") && !line.includes("STATUS") && !line.includes("INFO")) {
+          preservedLines.push(line);
+        }
+      }
+      text = preservedLines.join("\n").trim();
+    }
   }
 
-  return { text, choices: [] };
+  return { finalText: text, status: extractedStatus, choices: extractedChoices };
+}
+
+/**
+ * AI가 선택지 출력을 누락했을 때 상황에 맞춰 100% 몰입감 있게 생성하는 동적 대체 선택지
+ */
+function generateContextAwareFallbackChoices(text, status, userPrompt) {
+  const combined = ((status ? Object.values(status).join(" ") : "") + " " + text + " " + (userPrompt || "")).toLowerCase();
+
+  // 1. 캐릭터 생성 / 빙의 초기 단계
+  if (status && (status.possession === "미정" || status.possession?.includes("대기") || status.location?.includes("생성") || combined.includes("캐릭터 생성") || combined.includes("누구로 빙의"))) {
+    return [
+      "원작 주인공의 행보를 따라 정석대로 시작한다",
+      "독자적인 오리지널 능력으로 나만의 길을 개척한다",
+      "라이벌 또는 주요 조연의 시점으로 세계관에 개입한다"
+    ];
+  }
+
+  // 2. 전투 / 위기 / 적 대치
+  if (combined.includes("전투") || combined.includes("공격") || combined.includes("적") || combined.includes("몬스터") || combined.includes("무기") || combined.includes("검") || combined.includes("마법") || combined.includes("위험")) {
+    return [
+      "적의 약점을 노려 전광석화처럼 선제 공격을 가한다",
+      "방어 태세를 갖추며 상대의 빈틈을 침착하게 노린다",
+      "거리를 벌리며 주변 지형지물을 활용해 유리한 고지를 점한다"
+    ];
+  }
+
+  // 3. 탐색 / 마을 / 수련 / 광장 / 이동
+  if (combined.includes("연무장") || combined.includes("수련") || combined.includes("광장") || combined.includes("마을") || combined.includes("길") || combined.includes("탐색") || combined.includes("노가다")) {
+    return [
+      "주변 지형과 상점가를 둘러보며 핵심 정보를 수집한다",
+      "소지품과 기본 장비를 점검하고 본격적인 수련에 들어간다",
+      "가까운 주민이나 NPC에게 다가가 단서나 퀘스트를 묻는다"
+    ];
+  }
+
+  // 4. 대화 / 만남 / 상호작용
+  if (combined.includes("대화") || combined.includes("말") || combined.includes("묻") || combined.includes("레이카") || combined.includes("바라보")) {
+    return [
+      "호의적인 태도로 현재 세계관과 목표에 대해 더 자세히 묻는다",
+      "속마음을 숨기고 상대방의 진의를 조심스럽게 떠본다",
+      "단도직입적으로 본론을 꺼내며 결단을 요구한다"
+    ];
+  }
+
+  // 기본 몰입형 액션 대안
+  return [
+    "주변 상황을 면밀히 살피며 가장 유리한 행동을 개시한다",
+    "예상치 못한 기습이나 변수에 대비해 만반의 준비를 한다",
+    "새로운 단서를 찾아 적극적으로 발걸음을 옮긴다"
+  ];
 }
 
 /**
  * 스트리밍 도중 열린 미완성 코드블록을 화면에서 숨김 (Func 19561)
  */
 function stripTrailingBlocksForStreaming(text) {
-  const tags = ["```CHOICES", "```choices", "```INFO", "```info", "```STATUS", "```status"];
+  const tags = ["```CHOICES", "```choices", "```choice", "```CHOICE", "```선택지", "```선택", "```options", "```actions", "```INFO", "```info", "```STATUS", "```status", "```상태창"];
   const indices = tags.map((tag) => text.toLowerCase().indexOf(tag.toLowerCase())).filter((idx) => idx !== -1);
   if (indices.length === 0) return text;
   const cutPoint = Math.min(...indices);
@@ -216,12 +280,15 @@ const SYSTEM_PROMPT = `당신은 '창작물 빙의 시뮬레이션(창·빙·시
 장소: [현재 위치]
 \`\`\`
 
-3. 선택지 (반드시 아래 CHOICES 블록으로 3개 제시):
+3. 선택지 (반드시 아래 CHOICES 블록으로 3개 제시 - 절대 생략 금지):
 \`\`\`CHOICES
-1. [행동 선택지 1]
-2. [행동 선택지 2]
-3. [행동 선택지 3]
+1. [현재 세계관 및 상황에 밀착된 구체적 행동 1]
+2. [현재 세계관 및 상황에 밀착된 구체적 행동 2]
+3. [현재 세계관 및 상황에 밀착된 구체적 행동 3]
 \`\`\`
+- [선택지 고증 및 다양성 절대 지침]:
+  - "1. 상황을 더 지켜본다", "2. 적극적으로 행동한다", "3. 거리를 둔다" 같은 뻔하고 진부한 일반론적 선택지 제시 절대 금지!
+  - 반드시 현재 세계관의 고유 명사, 현재 머물고 있는 장소(연무장, 상점, 던전, 주점 등), 마주친 인물, 당장 실행할 수 있는 원작 특색의 구체적 액션(노가다 수련, 스킬 연습, 아이템 흥정, 퀘스트 수주, 은밀한 정찰 등)을 직접적으로 반영한 몰입감 넘치는 행동 3가지를 매 턴 새롭게 제시하십시오.
 
 [특수 명령어 처리]
 - 세이브: 현재까지의 상황, 인물 호감도, 퀘스트 요약 정리
@@ -1187,9 +1254,8 @@ async function handleSend() {
       }
     }
 
-    // 스트리밍 완료 후: 상태창 및 선택지 정밀 파싱
-    const { text: textWithoutStatus, status } = extractStatusWindow(accumulatedText);
-    let { text: finalText, choices } = extractChoices(textWithoutStatus);
+    // 스트리밍 완료 후: 상태창 및 선택지 정밀 상호 독립 파싱
+    let { finalText, status, choices } = parseTurnOutput(accumulatedText);
 
     // 필터 중단 감지 시 친절한 안내 및 이어가기 유도
     if (lastFinishReason === "RECITATION") {
@@ -1218,14 +1284,10 @@ async function handleSend() {
       bubble.appendChild(cardEl);
     }
 
-    // 선택지 폴백: 만약 AI가 선택지를 전혀 출력하지 않았다면, 인터랙션이 끊기지 않도록 상황 대안 3개 자동 보충
+    // 선택지 폴백: AI가 선택지 출력을 누락했더라도, 현재 작품/상황/인물에 100% 밀착된 동적 맞춤 대안 3개 자동 보충
     let effectiveChoices = choices;
     if (!effectiveChoices || effectiveChoices.length === 0) {
-      effectiveChoices = [
-        "상황을 더 지켜보며 대화를 이어간다",
-        "적극적으로 다음 행동을 취한다",
-        "주변 상황을 살피며 거리를 둔다",
-      ];
+      effectiveChoices = generateContextAwareFallbackChoices(finalText, effectiveStatus, text);
     }
 
     // 선택지 버튼 렌더링
