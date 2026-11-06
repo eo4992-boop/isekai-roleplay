@@ -392,9 +392,9 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-// v2.5 모델 라인업: Flash Lite, 3.8 Flash, 2.5 Flash, 2.0 Flash 정규 지원
-const VALID_MODELS = ["gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
-if (!savedModel || savedModel.includes("3.5") || savedModel.includes("3.6") || !VALID_MODELS.includes(savedModel)) {
+// 기본 모델: 쿼터 제한(20회) 없이 하루 1,500회 쾌적하게 작동하는 gemini-flash-lite-latest 고정
+const VALID_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"];
+if (!savedModel || !VALID_MODELS.includes(savedModel) || savedModel === "gemini-3.5-flash") {
   savedModel = "gemini-flash-lite-latest";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
@@ -1166,24 +1166,19 @@ async function handleSend() {
     // 일시적인 503/429 트래픽 스파이크 및 스트리밍 중간 연결 끊김을 완벽 극복하는 지능형 재시도 루프
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 공식 대체 모델로 지능적 순환 전환
-        if (selectedModel === "gemini-3.8-flash") {
-          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-flash-lite-latest";
-        } else if (selectedModel === "gemini-2.5-flash") {
-          currentAttemptModel = attempt === 1 ? "gemini-2.0-flash" : "gemini-flash-lite-latest";
-        } else if (selectedModel === "gemini-2.0-flash") {
-          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-flash-lite-latest";
-        } else {
-          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-2.0-flash";
-        }
-        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 스트리밍 재연결 중 -> 대체 모델(${currentAttemptModel.replace("gemini-", "")})로 자동 전환 (${attempt}/${maxRetries - 1})...</div>`;
-        await new Promise((r) => setTimeout(r, 2000));
+        // 일시적 스트림 끊김 또는 서버 혼잡 시, 횟수 제한 없는 Flash Lite 계열 내에서 안전하게 재시도
+        currentAttemptModel = currentAttemptModel === "gemini-flash-lite-latest" ? "gemini-3.5-flash-lite" : "gemini-flash-lite-latest";
+        contentEl.innerHTML = `<div style="font-size: 12px; color: var(--current-accent);">🔄 구글 서버 일시 지연 감지 -> Flash Lite로 즉시 재연결 중 (${attempt}/${maxRetries - 1})...</div>`;
+        await new Promise((r) => setTimeout(r, 1800));
       }
 
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentAttemptModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       const genConfig = {
         temperature: 0.85,
         maxOutputTokens: 3000,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       };
 
       const payload = {
