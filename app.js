@@ -1176,10 +1176,10 @@ async function handleSend() {
       const genConfig = {
         temperature: 0.85,
         maxOutputTokens: 3000,
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
       };
+      if (!currentAttemptModel.includes("lite")) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
 
       const payload = {
         systemInstruction: {
