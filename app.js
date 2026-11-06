@@ -392,9 +392,9 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-// v2.4 마이그레이션: 기본 모델을 사용자 친화적인 gemini-flash-lite-latest로 복원하며 2.5-flash 및 2.0-flash 완벽 지원
-const VALID_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
-if (!savedModel || savedModel.includes("3.5") || savedModel.includes("3.6") || savedModel.includes("3.8") || !VALID_MODELS.includes(savedModel)) {
+// v2.5 모델 라인업: Flash Lite, 3.8 Flash, 2.5 Flash, 2.0 Flash 정규 지원
+const VALID_MODELS = ["gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
+if (!savedModel || savedModel.includes("3.5") || savedModel.includes("3.6") || !VALID_MODELS.includes(savedModel)) {
   savedModel = "gemini-flash-lite-latest";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
@@ -1167,7 +1167,9 @@ async function handleSend() {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
         // 스트림 중간 소켓 끊김 또는 트래픽 혼잡 감지 시, 공식 대체 모델로 지능적 순환 전환
-        if (selectedModel === "gemini-2.5-flash") {
+        if (selectedModel === "gemini-3.8-flash") {
+          currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-flash-lite-latest";
+        } else if (selectedModel === "gemini-2.5-flash") {
           currentAttemptModel = attempt === 1 ? "gemini-2.0-flash" : "gemini-flash-lite-latest";
         } else if (selectedModel === "gemini-2.0-flash") {
           currentAttemptModel = attempt === 1 ? "gemini-2.5-flash" : "gemini-flash-lite-latest";
