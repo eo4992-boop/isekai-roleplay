@@ -191,12 +191,27 @@ function parseTurnOutput(rawText) {
 function generateContextAwareFallbackChoices(text, status, userPrompt) {
   const combined = ((status ? Object.values(status).join(" ") : "") + " " + text + " " + (userPrompt || "")).toLowerCase();
 
-  // 1. 캐릭터 생성 / 빙의 초기 단계
-  if (status && (status.possession === "미정" || status.possession?.includes("대기") || status.location?.includes("생성") || combined.includes("캐릭터 생성") || combined.includes("누구로 빙의"))) {
+  // 1. 캐릭터 생성 / 빙의 초기 단계 (어떤 인물로 빙의, 빙의 미정, 작품 첫 턴 등)
+  const isCharacterCreationStage =
+    !status ||
+    status.possession === "미정" ||
+    status.possession?.includes("대기") ||
+    status.possession?.includes("미설정") ||
+    status.location?.includes("생성") ||
+    status.location?.includes("로비") ||
+    combined.includes("빙의") ||
+    combined.includes("캐릭터") ||
+    combined.includes("어떤 인물") ||
+    combined.includes("인물로") ||
+    combined.includes("시작하겠") ||
+    combined.includes("원하는 설정") ||
+    combined.includes("선택해");
+
+  if (isCharacterCreationStage) {
     return [
-      "원작 주인공의 행보를 따라 정석대로 시작한다",
-      "독자적인 오리지널 능력으로 나만의 길을 개척한다",
-      "라이벌 또는 주요 조연의 시점으로 세계관에 개입한다"
+      "원작 주인공의 시점으로 세계관에 본격 빙의한다",
+      "독자적인 오리지널 신규 캐릭터로 나만의 길을 개척한다",
+      "원작 속 매력적인 조연이나 라이벌 인물로 빙의한다"
     ];
   }
 
@@ -219,7 +234,7 @@ function generateContextAwareFallbackChoices(text, status, userPrompt) {
   }
 
   // 4. 대화 / 만남 / 상호작용
-  if (combined.includes("대화") || combined.includes("말") || combined.includes("묻") || combined.includes("레이카") || combined.includes("바라보")) {
+  if (combined.includes("대화") || combined.includes("말") || combined.includes("묻") || combined.includes("바라보")) {
     return [
       "호의적인 태도로 현재 세계관과 목표에 대해 더 자세히 묻는다",
       "속마음을 숨기고 상대방의 진의를 조심스럽게 떠본다",
@@ -263,7 +278,24 @@ const SYSTEM_PROMPT = `당신은 '창작물 빙의 시뮬레이션(창·빙·시
   - 원작의 세계관과 고증은 완벽히 반영하되, 반드시 **레이카의 재치 있는 어조와 당신 자신의 생생한 표현으로 새롭게 각색·요약·재구성하여 서술**하십시오.
 
 [스토리 진행 필수 양식 및 서술 분량 지침]
-플레이어가 작품명을 말하거나 행동을 입력하면, 스토리를 생생하게 진행하며 매 턴 반드시 아래 3단계를 순서대로 빠짐없이 출력하세요:
+플레이어가 작품명을 말하거나 행동을 입력하면, 스토리를 생생하게 진행하며 매 턴 반드시 아래 양식을 순서대로 빠짐없이 출력하세요:
+
+[첫 턴: 플레이어가 작품명을 제시했을 때의 특별 필수 지침]
+- 플레이어가 처음으로 작품명을 입력했을 때 (예: "달빛조각사"):
+  1. 레이카의 밝고 친절한 환영 인사와 함께 해당 작품의 핵심 매력/설정을 기대감 넘치게 요약 소개합니다.
+  2. 어떤 인물로 빙의할지 물어보며, 아래와 같이 반드시 상태창(\`\`\`INFO)과 3개의 캐릭터 빙의 선택지(\`\`\`CHOICES)를 절대 누락 없이 100% 출력하십시오:
+\`\`\`INFO
+빙의: 미정 (캐릭터 선택 대기 중)
+장비: 기본 의복
+능력: 없음
+시간: 원작 시작 시점
+장소: 캐릭터 생성 로비
+\`\`\`
+\`\`\`CHOICES
+1. 원작 주인공 [해당 작품의 주인공 이름]으로 빙의하여 시작한다
+2. 해당 세계관의 오리지널 신규 캐릭터(신규 플레이어 등)로 빙의하여 시작한다
+3. 원작의 주요 라이벌 또는 개성 있는 조연 인물로 빙의하여 시작한다
+\`\`\`
 
 1. 스토리 본문 (풍부한 서사와 완성도 필수):
 - 반드시 최소 3~5개 문단 이상으로 상황, 배경, 인물의 오감, 심리와 주변 반응을 풍부하고 밀도 있게 서술하십시오.
@@ -360,10 +392,10 @@ const ONBOARDING_MESSAGE = `| **창작물 빙의 시뮬레이션** |
 // =============================================================================
 let apiKey = localStorage.getItem("GEMINI_API_KEY") || "";
 let savedModel = localStorage.getItem("GEMINI_MODEL");
-// v2.3 마이그레이션: 존재하지 않는 임시 모델(3.5 등) 및 구버전 설정을 공식 안정 모델(gemini-2.5-flash)로 강제 갱신
-const VALID_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest"];
+// v2.4 마이그레이션: 기본 모델을 사용자 친화적인 gemini-flash-lite-latest로 복원하며 2.5-flash 및 2.0-flash 완벽 지원
+const VALID_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.0-flash"];
 if (!savedModel || savedModel.includes("3.5") || savedModel.includes("3.6") || savedModel.includes("3.8") || !VALID_MODELS.includes(savedModel)) {
-  savedModel = "gemini-2.5-flash";
+  savedModel = "gemini-flash-lite-latest";
   localStorage.setItem("GEMINI_MODEL", savedModel);
 }
 let selectedModel = savedModel;
